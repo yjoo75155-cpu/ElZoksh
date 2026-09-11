@@ -1,0 +1,255 @@
+name: Build Yawmeyat ElZoksh APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["main", "master"]
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prepare Android project
+        shell: bash
+        run: |
+          set -e
+
+          rm -rf android
+
+          mkdir -p android/app/src/main/java/com/zoksh/yawmeyat
+          mkdir -p android/app/src/main/assets/www
+          mkdir -p android/app/src/main/res/values
+
+          # Copy web app files only
+          for f in index.html style.css app.js manifest.json sw.js; do
+            if [ -f "$f" ]; then
+              cp "$f" "android/app/src/main/assets/www/$f"
+            fi
+          done
+
+          # Copy optional web folders
+          for d in public assets icons; do
+            if [ -d "$d" ]; then
+              cp -R "$d" "android/app/src/main/assets/www/"
+            fi
+          done
+
+          # Make sure the main page exists
+          test -f android/app/src/main/assets/www/index.html
+
+          cat > android/settings.gradle <<'EOF'
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+
+          rootProject.name = "YawmeyatElZoksh"
+
+          include(":app")
+          EOF
+
+          cat > android/build.gradle <<'EOF'
+          plugins {
+              id 'com.android.application' version '8.5.2' apply false
+          }
+          EOF
+
+          cat > android/gradle.properties <<'EOF'
+          org.gradle.jvmargs=-Xmx3g -Dfile.encoding=UTF-8
+          android.useAndroidX=false
+          android.nonTransitiveRClass=true
+          EOF
+
+          cat > android/app/build.gradle <<'EOF'
+          plugins {
+              id 'com.android.application'
+          }
+
+          android {
+              namespace 'com.zoksh.yawmeyat'
+
+              compileSdk 35
+
+              defaultConfig {
+                  applicationId 'com.zoksh.yawmeyat'
+
+                  minSdk 23
+                  targetSdk 35
+
+                  versionCode 20
+                  versionName '20.0'
+              }
+          }
+          EOF
+
+          cat > android/app/src/main/res/values/strings.xml <<'EOF'
+          <resources>
+              <string name="app_name">يوميات الزوكش</string>
+          </resources>
+          EOF
+
+          cat > android/app/src/main/res/values/themes.xml <<'EOF'
+          <resources>
+
+              <style name="AppTheme"
+                  parent="@android:style/Theme.Material.NoActionBar">
+
+                  <item name="android:statusBarColor">#10071f</item>
+
+                  <item name="android:navigationBarColor">#08040f</item>
+
+                  <item name="android:windowLightStatusBar">
+                      false
+                  </item>
+
+              </style>
+
+          </resources>
+          EOF
+
+          cat > android/app/src/main/AndroidManifest.xml <<'EOF'
+          <manifest
+              xmlns:android="http://schemas.android.com/apk/res/android">
+
+              <uses-permission
+                  android:name="android.permission.INTERNET" />
+
+              <uses-permission
+                  android:name="android.permission.POST_NOTIFICATIONS" />
+
+              <application
+                  android:theme="@style/AppTheme"
+                  android:label="@string/app_name"
+                  android:usesCleartextTraffic="true"
+                  android:allowBackup="true"
+                  android:supportsRtl="true">
+
+                  <activity
+                      android:name=".MainActivity"
+                      android:screenOrientation="portrait"
+                      android:exported="true">
+
+                      <intent-filter>
+
+                          <action
+                              android:name="android.intent.action.MAIN" />
+
+                          <category
+                              android:name="android.intent.category.LAUNCHER" />
+
+                      </intent-filter>
+
+                  </activity>
+
+              </application>
+
+          </manifest>
+          EOF
+
+          cat > android/app/src/main/java/com/zoksh/yawmeyat/MainActivity.java <<'EOF'
+          package com.zoksh.yawmeyat;
+
+          import android.app.Activity;
+          import android.os.Bundle;
+
+          import android.webkit.WebChromeClient;
+          import android.webkit.WebSettings;
+          import android.webkit.WebView;
+          import android.webkit.WebViewClient;
+
+          public class MainActivity extends Activity {
+
+              private WebView web;
+
+              @Override
+              protected void onCreate(Bundle savedInstanceState) {
+
+                  super.onCreate(savedInstanceState);
+
+                  web = new WebView(this);
+
+                  web.setWebViewClient(
+                      new WebViewClient()
+                  );
+
+                  web.setWebChromeClient(
+                      new WebChromeClient()
+                  );
+
+                  WebSettings settings =
+                      web.getSettings();
+
+                  settings.setJavaScriptEnabled(true);
+
+                  settings.setDomStorageEnabled(true);
+
+                  settings.setDatabaseEnabled(true);
+
+                  settings.setAllowFileAccess(true);
+
+                  settings.setAllowContentAccess(true);
+
+                  settings.setMediaPlaybackRequiresUserGesture(false);
+
+                  setContentView(web);
+
+                  web.loadUrl(
+                      "file:///android_asset/www/index.html"
+                  );
+              }
+
+              @Override
+              public void onBackPressed() {
+
+                  if (web != null && web.canGoBack()) {
+
+                      web.goBack();
+
+                  } else {
+
+                      super.onBackPressed();
+                  }
+              }
+          }
+          EOF
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Build APK
+        working-directory: android
+        run: |
+          gradle --no-daemon :app:assembleDebug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Yawmeyat-ElZoksh-V20-APK
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
