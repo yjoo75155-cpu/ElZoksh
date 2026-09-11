@@ -51,7 +51,7 @@ jobs:
           echo "Searching for project ZIP..."
 
           ZIP=$(find . -type f \
-            -iname 'Yawmeyat*.zip' -o -iname '*.zip' \
+            \( -iname 'Yawmeyat*.zip' -o -iname '*.zip' \) \
             | head -n 1)
 
           if [ -z "$ZIP" ]; then
@@ -373,4 +373,265 @@ jobs:
               try {
 
                   const data =
-                      local
+                      localStorage.getItem(
+                          "zoksh_v8"
+                      );
+
+                  if (!data) {
+
+                      zokshV11Toast(
+                          "مفيش بيانات محفوظة"
+                      );
+
+                      return;
+                  }
+
+                  const blob =
+                      new Blob(
+                          [data],
+                          {
+                              type:
+                                "application/json"
+                          }
+                      );
+
+                  const url =
+                      URL.createObjectURL(
+                          blob
+                      );
+
+                  const a =
+                      document.createElement(
+                          "a"
+                      );
+
+                  a.href = url;
+
+                  a.download =
+                      "zoksh-backup.json";
+
+                  document.body.appendChild(a);
+
+                  a.click();
+
+                  a.remove();
+
+                  URL.revokeObjectURL(
+                      url
+                  );
+
+                  zokshV11Toast(
+                      "تم حفظ النسخة الاحتياطية ✅"
+                  );
+
+              } catch (e) {
+
+                  console.log(e);
+
+                  zokshV11Toast(
+                      "حصل خطأ أثناء النسخ الاحتياطي"
+                  );
+
+              }
+
+          }
+
+
+          function zokshV11Today() {
+
+              const d =
+                  new Date();
+
+              return new Intl.DateTimeFormat(
+                  "ar-EG",
+                  {
+                      weekday:"long",
+                      day:"numeric",
+                      month:"long"
+                  }
+              ).format(d);
+
+          }
+
+
+          window.addEventListener(
+              "load",
+              () => {
+
+                  setTimeout(
+                      () => {
+
+                          zokshV11Toast(
+                              "أهلاً بيك في يوميات الزوكش V11 🚀"
+                          );
+
+                      },
+                      900
+                  );
+
+              }
+          );
+
+          '''
+
+              script += addon
+
+          js.write_text(
+              script,
+              encoding="utf-8"
+          )
+
+          print("V11 web upgrade completed.")
+          PY
+
+      # ==========================================
+      # 6 - فحص JavaScript
+      # ==========================================
+      - name: Validate JavaScript
+        shell: bash
+        run: |
+          set -e
+
+          node --check "$WEB_DIR/app.js"
+
+          test -f "$WEB_DIR/index.html"
+          test -f "$WEB_DIR/style.css"
+          test -f "$WEB_DIR/app.js"
+
+          echo "JavaScript validation: OK"
+
+      # ==========================================
+      # 7 - تثبيت نسخة Android
+      # ==========================================
+      - name: Set Android Version
+        shell: bash
+        run: |
+          set -e
+
+          GRADLE="$APP_DIR/build.gradle"
+
+          python3 - "$GRADLE" <<'PY'
+          import sys
+          import re
+          from pathlib import Path
+
+          p = Path(sys.argv[1])
+          text = p.read_text(encoding="utf-8")
+
+          text = re.sub(
+              r'versionCode\s+\d+',
+              'versionCode 13',
+              text
+          )
+
+          text = re.sub(
+              r"versionName\s+['\"][^'\"]+['\"]",
+              "versionName '11.0'",
+              text
+          )
+
+          p.write_text(
+              text,
+              encoding="utf-8"
+          )
+
+          print("Version set to 11.0")
+          PY
+
+      # ==========================================
+      # 8 - التأكد من Manifest
+      # ==========================================
+      - name: Validate Android Manifest
+        shell: bash
+        run: |
+          set -e
+
+          MANIFEST="$APP_DIR/src/main/AndroidManifest.xml"
+
+          test -f "$MANIFEST"
+
+          grep -q "android.permission.POST_NOTIFICATIONS" "$MANIFEST" \
+            || echo "Notification permission not present - existing project may handle it differently."
+
+          grep -q 'MainActivity' "$MANIFEST"
+
+          echo "Android manifest validation: OK"
+
+      # ==========================================
+      # 9 - تحميل Gradle
+      # ==========================================
+      - name: Install Gradle 8.7
+        shell: bash
+        run: |
+          set -e
+
+          curl -L \
+            --fail \
+            --retry 3 \
+            -o /tmp/gradle.zip \
+            https://services.gradle.org/distributions/gradle-8.7-bin.zip
+
+          rm -rf /tmp/gradle-8.7
+
+          unzip -q \
+            /tmp/gradle.zip \
+            -d /tmp
+
+          /tmp/gradle-8.7/bin/gradle --version
+
+      # ==========================================
+      # 10 - بناء APK
+      # ==========================================
+      - name: Build APK
+        working-directory: ${{ env.ANDROID_ROOT }}
+        shell: bash
+        run: |
+          set -e
+
+          echo "Android project:"
+          pwd
+
+          echo ""
+          echo "Project files:"
+          find . -maxdepth 4 -type f | sort
+
+          echo ""
+          echo "Starting Gradle build..."
+
+          /tmp/gradle-8.7/bin/gradle \
+            :app:assembleDebug \
+            --no-daemon \
+            --stacktrace
+
+      # ==========================================
+      # 11 - التأكد من APK
+      # ==========================================
+      - name: Verify APK
+        shell: bash
+        run: |
+          set -e
+
+          APK="$APP_DIR/build/outputs/apk/debug/app-debug.apk"
+
+          if [ ! -f "$APK" ]; then
+            echo "ERROR: APK was not generated."
+            find "$APP_DIR/build" -type f 2>/dev/null || true
+            exit 1
+          fi
+
+          echo ""
+          echo "======================================"
+          echo "APK CREATED SUCCESSFULLY"
+          echo "======================================"
+          ls -lh "$APK"
+
+      # ==========================================
+      # 12 - رفع APK
+      # ==========================================
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Yawmeyat-ElZoksh-V11
+          path: ${{ env.APP_DIR }}/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 7
