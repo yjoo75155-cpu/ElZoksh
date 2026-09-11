@@ -1,9 +1,12 @@
-name: Build Android APK
+name: Build يوميات الزوكش V11
 
 on:
   push:
     branches: [ main ]
   workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   build:
@@ -13,134 +16,3446 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Java
+      - name: Setup Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
+          cache: gradle
 
-      - name: Setup Android
+      - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
       - name: Install Android SDK
         run: |
           sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
 
-      - name: Extract project
+      - name: Extract existing project ZIP
+        shell: bash
         run: |
+          set -e
+
+          ZIP=$(find . -maxdepth 1 -type f -name 'Yawmeyat*.zip' \
+            -printf '%T@ %p\n' |
+            sort -nr |
+            head -1 |
+            cut -d' ' -f2-)
+
+          [ -n "$ZIP" ] || {
+            echo "No Yawmeyat*.zip found in repository"
+            exit 1
+          }
+
+          rm -rf project
           mkdir project
-          unzip -q Yawmeyat*.zip -d project
 
-      - name: Fix Android WebView
+          unzip -q "$ZIP" -d project
+
+          echo "Using ZIP: $ZIP"
+
+          find project -maxdepth 4 -type f | head -80
+
+      - name: Build V11 web app + Android bridge
         working-directory: project
+        shell: bash
         run: |
-          python3 <<'PY'
-          from pathlib import Path
+          set -e
 
-          root = Path("android") if Path("android").is_dir() else Path(".")
+          ROOT="."
 
-          gradle = root / "app" / "build.gradle"
-          main = root / "app" / "src/main/java/com/zoksh/yawmeyat/MainActivity.java"
+          if [ -d android ]; then
+            ROOT="android"
+          fi
 
-          if not gradle.exists():
-              raise SystemExit(f"build.gradle not found: {gradle}")
+          WWW="$ROOT/app/src/main/assets/www"
 
-          if not main.exists():
-              raise SystemExit(f"MainActivity not found: {main}")
+          if [ ! -d "$WWW" ]; then
+            echo "Web assets folder not found:"
+            echo "$WWW"
+            exit 1
+          fi
 
-          text = gradle.read_text()
+          mkdir -p "$WWW"
 
-          if "androidx.webkit:webkit" not in text:
-              text = text.replace(
-                  "plugins { id 'com.android.application' }",
-                  """plugins { id 'com.android.application' }
+          cat > "$WWW/index.html" <<'HTML'
+          <!doctype html>
+          <html lang="ar" dir="rtl">
 
-          dependencies {
-              implementation 'androidx.webkit:webkit:1.12.1'
-          }"""
+          <head>
+
+          <meta charset="utf-8">
+
+          <meta
+            name="viewport"
+            content="width=device-width,
+            initial-scale=1,
+            viewport-fit=cover,
+            user-scalable=no">
+
+          <meta
+            name="theme-color"
+            content="#140b2e">
+
+          <title>يوميات الزوكش</title>
+
+          <style>
+
+          :root{
+            --bg:#100821;
+            --panel:#1a1035;
+            --panel2:#24164a;
+            --line:#4a3181;
+            --p:#8b45ff;
+            --p2:#b56cff;
+            --cyan:#35e5d0;
+            --green:#27e69b;
+            --yellow:#ffd24a;
+            --red:#ff6688;
+            --text:#fff;
+            --muted:#bdb2d8;
+            --r:20px
+          }
+
+          *{
+            box-sizing:border-box;
+            -webkit-tap-highlight-color:transparent
+          }
+
+          body{
+            margin:0;
+            background:
+              radial-gradient(
+                circle at 50% -10%,
+                #402079 0,
+                #170d31 38%,
+                var(--bg) 72%
+              );
+            color:var(--text);
+            font-family:
+              system-ui,
+              -apple-system,
+              "Segoe UI",
+              Tahoma,
+              Arial,
+              sans-serif;
+            min-height:100vh
+          }
+
+          button,
+          input,
+          select,
+          textarea{
+            font:inherit
+          }
+
+          button{
+            border:0;
+            color:white;
+            cursor:pointer
+          }
+
+          .app{
+            max-width:520px;
+            margin:auto;
+            min-height:100vh;
+            padding:12px 12px 92px
+          }
+
+          .top{
+            display:flex;
+            align-items:center;
+            justify-content:space-between;
+            padding:7px 4px 14px
+          }
+
+          .brand{
+            font-size:23px;
+            font-weight:900
+          }
+
+          .iconbtn{
+            width:42px;
+            height:42px;
+            border-radius:14px;
+            background:#211342;
+            border:1px solid #53358e;
+            font-size:21px
+          }
+
+          .hero{
+            padding:18px;
+            border-radius:26px;
+            background:
+              linear-gradient(
+                145deg,
+                #2c1756,
+                #17102f
+              );
+            border:1px solid #6841a8;
+            box-shadow:0 15px 45px #0005
+          }
+
+          .hero h1{
+            margin:0 0 7px;
+            font-size:22px
+          }
+
+          .muted{
+            color:var(--muted);
+            font-size:13px
+          }
+
+          .grid{
+            display:grid;
+            grid-template-columns:1fr 1fr;
+            gap:10px;
+            margin-top:11px
+          }
+
+          .card{
+            background:
+              linear-gradient(
+                145deg,
+                #211440,
+                #18102f
+              );
+            border:1px solid #493078;
+            border-radius:18px;
+            padding:14px
+          }
+
+          .stat{
+            min-height:92px
+          }
+
+          .stat .n{
+            font-size:23px;
+            font-weight:900;
+            margin-top:5px
+          }
+
+          .cyan{color:var(--cyan)}
+          .green{color:var(--green)}
+          .yellow{color:var(--yellow)}
+          .pink{color:#ff70ad}
+
+          .section{
+            margin-top:16px
+          }
+
+          .sectionhead{
+            display:flex;
+            justify-content:space-between;
+            align-items:center;
+            margin-bottom:9px
+          }
+
+          .sectionhead h2{
+            font-size:17px;
+            margin:0
+          }
+
+          .link{
+            color:var(--p2);
+            font-size:13px;
+            background:none
+          }
+
+          .item{
+            display:flex;
+            align-items:center;
+            gap:11px;
+            padding:12px;
+            border-radius:16px;
+            background:#1b1135;
+            border:1px solid #3c2868;
+            margin:8px 0
+          }
+
+          .check{
+            width:25px;
+            height:25px;
+            border-radius:50%;
+            border:2px solid #8d76b9;
+            display:grid;
+            place-items:center;
+            flex:none
+          }
+
+          .check.done{
+            background:var(--green);
+            border-color:var(--green);
+            color:#0d1630
+          }
+
+          .itemmain{
+            flex:1
+          }
+
+          .itemtitle{
+            font-weight:700
+          }
+
+          .bar{
+            height:8px;
+            border-radius:99px;
+            background:#332253;
+            overflow:hidden;
+            margin-top:8px
+          }
+
+          .bar i{
+            display:block;
+            height:100%;
+            border-radius:99px;
+            background:
+              linear-gradient(
+                90deg,
+                var(--p),
+                var(--cyan)
+              );
+            width:0
+          }
+
+          .pill{
+            display:inline-flex;
+            padding:6px 10px;
+            border-radius:99px;
+            background:#29184d;
+            color:#ddd1f2;
+            font-size:12px;
+            border:1px solid #4a3181
+          }
+
+          .fab{
+            position:fixed;
+            right:calc(50% - 240px);
+            bottom:82px;
+            width:58px;
+            height:58px;
+            border-radius:20px;
+            background:
+              linear-gradient(
+                145deg,
+                #a14cff,
+                #6420e8
+              );
+            font-size:30px;
+            box-shadow:
+              0 10px 30px #6d2bff77
+          }
+
+          .bottom{
+            position:fixed;
+            bottom:0;
+            left:50%;
+            transform:translateX(-50%);
+            width:min(520px,100%);
+            display:grid;
+            grid-template-columns:repeat(5,1fr);
+            gap:4px;
+            padding:
+              8px
+              8px
+              calc(8px + env(safe-area-inset-bottom));
+            background:#130a28ee;
+            backdrop-filter:blur(18px);
+            border-top:1px solid #432a70
+          }
+
+          .nav{
+            background:none;
+            color:#998db7;
+            font-size:11px;
+            padding:7px 2px;
+            border-radius:14px
+          }
+
+          .nav b{
+            display:block;
+            font-size:20px;
+            margin-bottom:2px
+          }
+
+          .nav.active{
+            color:#d18aff;
+            background:#271448
+          }
+
+          .screen{
+            display:none
+          }
+
+          .screen.active{
+            display:block
+          }
+
+          .moneyhero{
+            display:grid;
+            grid-template-columns:repeat(3,1fr);
+            gap:7px;
+            text-align:center
+          }
+
+          .moneyhero .card{
+            padding:12px 5px
+          }
+
+          .moneyhero strong{
+            display:block;
+            font-size:18px;
+            margin-top:4px
+          }
+
+          .chart{
+            height:170px;
+            display:flex;
+            align-items:end;
+            gap:9px;
+            padding:15px
+          }
+
+          .col{
+            flex:1;
+            text-align:center;
+            font-size:10px;
+            color:var(--muted)
+          }
+
+          .col i{
+            display:block;
+            background:
+              linear-gradient(
+                #b86cff,
+                #6f35ff
+              );
+            border-radius:
+              8px 8px 2px 2px;
+            min-height:5px;
+            margin-bottom:5px
+          }
+
+          .chat{
+            min-height:56vh;
+            display:flex;
+            flex-direction:column;
+            gap:10px
+          }
+
+          .msg{
+            max-width:86%;
+            padding:12px 14px;
+            border-radius:18px;
+            background:#21133e;
+            border:1px solid #3f2a68;
+            align-self:flex-start;
+            white-space:pre-wrap
+          }
+
+          .msg.u{
+            align-self:flex-end;
+            background:
+              linear-gradient(
+                145deg,
+                #7131d7,
+                #9b42ff
               )
-              gradle.write_text(text)
+          }
 
-          java = r'''package com.zoksh.yawmeyat;
+          .composer{
+            display:flex;
+            gap:7px;
+            margin-top:10px
+          }
 
+          .composer input{
+            flex:1;
+            min-width:0;
+            background:#17102d;
+            border:1px solid #54358a;
+            border-radius:18px;
+            color:#fff;
+            padding:13px
+          }
+
+          .composer button{
+            width:48px;
+            border-radius:16px;
+            background:#8139ef
+          }
+
+          .goal{
+            position:relative;
+            overflow:hidden
+          }
+
+          .goal .pct{
+            font-size:25px;
+            font-weight:900
+          }
+
+          .empty{
+            text-align:center;
+            color:var(--muted);
+            padding:28px
+          }
+
+          .search{
+            width:100%;
+            background:#17102d;
+            border:1px solid #513486;
+            color:#fff;
+            border-radius:15px;
+            padding:12px;
+            margin-bottom:10px
+          }
+
+          .modal{
+            position:fixed;
+            inset:0;
+            background:#080410cc;
+            backdrop-filter:blur(7px);
+            display:none;
+            align-items:end;
+            justify-content:center;
+            z-index:20
+          }
+
+          .modal.open{
+            display:flex
+          }
+
+          .sheet{
+            width:min(520px,100%);
+            background:#1a1035;
+            border:1px solid #54358a;
+            border-radius:26px 26px 0 0;
+            padding:18px;
+            max-height:88vh;
+            overflow:auto
+          }
+
+          .field{
+            margin:10px 0
+          }
+
+          .field label{
+            display:block;
+            color:#cfc4e5;
+            font-size:13px;
+            margin-bottom:6px
+          }
+
+          .field input,
+          .field select,
+          .field textarea{
+            width:100%;
+            background:#100a22;
+            color:#fff;
+            border:1px solid #4c327d;
+            border-radius:13px;
+            padding:11px
+          }
+
+          .actions{
+            display:flex;
+            gap:8px;
+            margin-top:14px
+          }
+
+          .primary{
+            flex:1;
+            background:
+              linear-gradient(
+                145deg,
+                #9a46ff,
+                #6422dc
+              );
+            padding:12px;
+            border-radius:14px
+          }
+
+          .secondary{
+            background:#2b1a4b;
+            padding:12px;
+            border-radius:14px
+          }
+
+          .toast{
+            position:fixed;
+            top:18px;
+            left:50%;
+            transform:
+              translateX(-50%)
+              translateY(-20px);
+            opacity:0;
+            background:#271448;
+            border:1px solid #7545b4;
+            padding:11px 16px;
+            border-radius:14px;
+            z-index:50;
+            transition:.25s
+          }
+
+          .toast.show{
+            opacity:1;
+            transform:
+              translateX(-50%)
+              translateY(0)
+          }
+
+          .profile{
+            display:flex;
+            gap:12px;
+            align-items:center
+          }
+
+          .avatar{
+            width:68px;
+            height:68px;
+            border-radius:20px;
+            background:
+              linear-gradient(
+                145deg,
+                #7b37ef,
+                #27144a
+              );
+            display:grid;
+            place-items:center;
+            font-size:34px
+          }
+
+          .mini{
+            font-size:12px;
+            color:var(--muted)
+          }
+
+          @media(max-width:380px){
+
+            .brand{
+              font-size:20px
+            }
+
+            .hero h1{
+              font-size:19px
+            }
+
+            .grid{
+              gap:7px
+            }
+
+            .card{
+              padding:11px
+            }
+
+            .fab{
+              right:15px
+            }
+
+          }
+
+          </style>
+
+          </head>
+
+          <body>
+
+          <div id="toast" class="toast"></div>
+
+          <main class="app">
+
+          <header class="top">
+
+            <button
+              class="iconbtn"
+              onclick="notifyTest()">
+              🔔
+            </button>
+
+            <div class="brand">
+              👑 يوميات الزوكش
+            </div>
+
+            <button
+              class="iconbtn"
+              onclick="openProfile()">
+              ⚙️
+            </button>
+
+          </header>
+
+          <!-- HOME -->
+
+          <section
+            id="home"
+            class="screen active">
+
+            <div class="hero">
+
+              <div class="profile">
+
+                <div class="avatar">
+                  🧑‍💻
+                </div>
+
+                <div>
+
+                  <h1 id="greet">
+                    صباح الخير يا زوكش ☀️
+                  </h1>
+
+                  <div
+                    class="muted"
+                    id="dateText">
+                  </div>
+
+                </div>
+
+              </div>
+
+              <p class="muted">
+                "كل يوم صغير بيصنع مستقبلك الكبير."
+              </p>
+
+            </div>
+
+            <div class="grid">
+
+              <div class="card stat">
+
+                <div>
+                  🎯 مهام اليوم
+                </div>
+
+                <div
+                  class="n cyan"
+                  id="homeTasks">
+                  0/0
+                </div>
+
+              </div>
+
+              <div class="card stat">
+
+                <div>
+                  🔥 Streak العادات
+                </div>
+
+                <div
+                  class="n pink"
+                  id="homeStreak">
+                  0 أيام
+                </div>
+
+              </div>
+
+              <div class="card stat">
+
+                <div>
+                  💸 مصروف اليوم
+                </div>
+
+                <div
+                  class="n yellow"
+                  id="homeToday">
+                  0 ج
+                </div>
+
+              </div>
+
+              <div class="card stat">
+
+                <div>
+                  🐷 توفير الشهر
+                </div>
+
+                <div
+                  class="n green"
+                  id="homeSaved">
+                  0 ج
+                </div>
+
+              </div>
+
+            </div>
+
+            <div class="section">
+
+              <div class="sectionhead">
+
+                <h2>
+                  أحداث اليوم
+                </h2>
+
+                <button
+                  class="link"
+                  onclick="go('daily')">
+                  عرض الكل
+                </button>
+
+              </div>
+
+              <div id="homeList"></div>
+
+            </div>
+
+            <div class="section">
+
+              <div class="sectionhead">
+
+                <h2>
+                  🎯 أهدافي
+                </h2>
+
+                <button
+                  class="link"
+                  onclick="go('goals')">
+                  كل الأهداف
+                </button>
+
+              </div>
+
+              <div id="homeGoals"></div>
+
+            </div>
+
+          </section>
+
+          <!-- ASSISTANT -->
+
+          <section
+            id="assistant"
+            class="screen">
+
+            <div class="hero">
+
+              <h1>
+                🤖 المساعد الذكي
+              </h1>
+
+              <div class="muted">
+                اكتبلي طلبك وأنا أتعامل مع بيانات يومياتك.
+              </div>
+
+            </div>
+
+            <div
+              id="chat"
+              class="chat section">
+            </div>
+
+            <div class="composer">
+
+              <input
+                id="chatInput"
+                placeholder="مثال: صرفت 50 جنيه مواصلات">
+
+              <button
+                onclick="sendChat()">
+                ➤
+              </button>
+
+            </div>
+
+          </section>
+
+          <!-- MONEY -->
+
+          <section
+            id="money"
+            class="screen">
+
+            <div class="sectionhead">
+
+              <h2>
+                💰 فلوسي
+              </h2>
+
+              <button
+                class="link"
+                onclick="openExpense()">
+                ＋ مصروف
+              </button>
+
+            </div>
+
+            <input
+              class="search"
+              id="moneySearch"
+              placeholder="ابحث في المصروفات..."
+              oninput="renderMoney()">
+
+            <div class="moneyhero">
+
+              <div class="card">
+
+                <span class="mini">
+                  الدخل
+                </span>
+
+                <strong
+                  class="green"
+                  id="incomeVal">
+                  0 ج
+                </strong>
+
+              </div>
+
+              <div class="card">
+
+                <span class="mini">
+                  المصروفات
+                </span>
+
+                <strong
+                  class="pink"
+                  id="expenseVal">
+                  0 ج
+                </strong>
+
+              </div>
+
+              <div class="card">
+
+                <span class="mini">
+                  المتبقي
+                </span>
+
+                <strong
+                  class="cyan"
+                  id="remainVal">
+                  0 ج
+                </strong>
+
+              </div>
+
+            </div>
+
+            <div class="card section">
+
+              <div class="sectionhead">
+
+                <h2>
+                  📊 الإنفاق
+                </h2>
+
+                <span
+                  class="pill"
+                  id="monthLabel">
+                </span>
+
+              </div>
+
+              <div
+                id="chart"
+                class="chart">
+              </div>
+
+            </div>
+
+            <div class="section">
+
+              <div class="sectionhead">
+
+                <h2>
+                  💳 الأقساط والالتزامات
+                </h2>
+
+                <button
+                  class="link"
+                  onclick="addInstallment()">
+                  ＋ إضافة
+                </button>
+
+              </div>
+
+              <div id="installments"></div>
+
+            </div>
+
+            <div class="section">
+
+              <div class="sectionhead">
+
+                <h2>
+                  آخر المصروفات
+                </h2>
+
+              </div>
+
+              <div id="expenses"></div>
+
+            </div>
+
+          </section>
+
+          <!-- DAILY -->
+
+          <section
+            id="daily"
+            class="screen">
+
+            <div class="sectionhead">
+
+              <h2>
+                📅 يومي
+              </h2>
+
+              <button
+                class="link"
+                onclick="addTask()">
+                ＋ مهمة
+              </button>
+
+            </div>
+
+            <div class="card">
+
+              <div class="sectionhead">
+
+                <h2 id="dailyDate"></h2>
+
+                <span
+                  class="pill"
+                  id="taskPct">
+                  0%
+                </span>
+
+              </div>
+
+              <div class="bar">
+
+                <i id="taskBar"></i>
+
+              </div>
+
+            </div>
+
+            <div class="section">
+
+              <div class="sectionhead">
+
+                <h2>
+                  مهام اليوم
+                </h2>
+
+              </div>
+
+              <div id="tasks"></div>
+
+            </div>
+
+            <div class="section">
+
+              <div class="sectionhead">
+
+                <h2>
+                  🔥 عاداتي
+                </h2>
+
+                <button
+                  class="link"
+                  onclick="addHabit()">
+                  ＋ عادة
+                </button>
+
+              </div>
+
+              <div id="habits"></div>
+
+            </div>
+
+          </section>
+
+          <!-- GOALS -->
+
+          <section
+            id="goals"
+            class="screen">
+
+            <div class="sectionhead">
+
+              <h2>
+                🎯 أهدافي
+              </h2>
+
+              <button
+                class="link"
+                onclick="addGoal()">
+                ＋ هدف جديد
+              </button>
+
+            </div>
+
+            <div id="goalsList"></div>
+
+          </section>
+
+          <!-- SETTINGS -->
+
+          <section
+            id="settings"
+            class="screen">
+
+            <div class="card profile">
+
+              <div class="avatar">
+                🧑‍💻
+              </div>
+
+              <div>
+
+                <h2
+                  id="profileName"
+                  style="margin:0">
+                  زوكش
+                </h2>
+
+                <div class="muted">
+                  مساعدك لحياة أفضل 💜
+                </div>
+
+              </div>
+
+            </div>
+
+            <div
+              class="section"
+              id="settingsList">
+            </div>
+
+          </section>
+
+          </main>
+
+          <button
+            class="fab"
+            onclick="quickAdd()">
+            ＋
+          </button>
+
+          <nav class="bottom">
+
+            <button
+              class="nav active"
+              data-go="home">
+
+              <b>⌂</b>
+              الرئيسية
+
+            </button>
+
+            <button
+              class="nav"
+              data-go="assistant">
+
+              <b>🤖</b>
+              المساعد
+
+            </button>
+
+            <button
+              class="nav"
+              data-go="money">
+
+              <b>💰</b>
+              فلوسي
+
+            </button>
+
+            <button
+              class="nav"
+              data-go="daily">
+
+              <b>📅</b>
+              يومي
+
+            </button>
+
+            <button
+              class="nav"
+              data-go="settings">
+
+              <b>⚙</b>
+              الإعدادات
+
+            </button>
+
+          </nav>
+
+          <div
+            id="modal"
+            class="modal">
+
+            <div class="sheet">
+
+              <div class="sectionhead">
+
+                <h2 id="modalTitle"></h2>
+
+                <button
+                  class="iconbtn"
+                  onclick="closeModal()">
+                  ×
+                </button>
+
+              </div>
+
+              <div id="modalBody"></div>
+
+            </div>
+
+          </div>
+
+          <input
+            id="restoreFile"
+            type="file"
+            accept="application/json"
+            hidden>
+
+          <script>
+
+          const KEY = 'zoksh_v11';
+
+          let data = load();
+
+          function fresh(){
+
+            return {
+
+              profile:{
+                name:'زوكش',
+                income:8000
+              },
+
+              expenses:[],
+
+              installments:[],
+
+              tasks:[
+                {
+                  id:1,
+                  t:'مذاكرة الإنجليزي',
+                  time:'10:00 ص',
+                  done:false
+                },
+                {
+                  id:2,
+                  t:'رياضة',
+                  time:'5:00 م',
+                  done:false
+                }
+              ],
+
+              habits:[
+                {
+                  id:1,
+                  t:'مذاكرة',
+                  streak:3,
+                  done:false
+                },
+                {
+                  id:2,
+                  t:'رياضة',
+                  streak:5,
+                  done:false
+                },
+                {
+                  id:3,
+                  t:'قراءة',
+                  streak:2,
+                  done:false
+                },
+                {
+                  id:4,
+                  t:'مياه',
+                  streak:7,
+                  done:false
+                }
+              ],
+
+              goals:[
+                {
+                  id:1,
+                  t:'لابتوب جديد',
+                  current:6000,
+                  target:10000,
+                  deadline:'2026-12-01',
+                  icon:'💻'
+                },
+                {
+                  id:2,
+                  t:'سفر إلى إسطنبول',
+                  current:6000,
+                  target:20000,
+                  deadline:'2027-02-01',
+                  icon:'✈️'
+                },
+                {
+                  id:3,
+                  t:'تطوير الذات',
+                  current:800,
+                  target:1000,
+                  deadline:'2026-10-15',
+                  icon:'📚'
+                }
+              ],
+
+              chat:[
+                {
+                  w:'b',
+                  t:
+                  'أهلاً يا زوكش 👋\n' +
+                  'أنا المساعد الذكي. أقدر أسجل مصاريفك ومهامك وأهدافك، وأحلل فلوسك وخططك.'
+                }
+              ],
+
+              xp:0,
+
+              reminders:[]
+
+            };
+
+          }
+
+          function load(){
+
+            try{
+
+              return Object.assign(
+                fresh(),
+                JSON.parse(
+                  localStorage.getItem(KEY) || '{}'
+                )
+              );
+
+            }catch(e){
+
+              return fresh();
+
+            }
+
+          }
+
+          function save(){
+
+            localStorage.setItem(
+              KEY,
+              JSON.stringify(data)
+            );
+
+          }
+
+          const $ =
+            id => document.getElementById(id);
+
+          const money =
+            n =>
+            new Intl.NumberFormat('ar-EG')
+              .format(Math.round(Number(n)||0))
+              + ' ج';
+
+          function today(){
+
+            return new Date()
+              .toISOString()
+              .slice(0,10);
+
+          }
+
+          function toast(t){
+
+            $('toast').textContent=t;
+
+            $('toast')
+              .classList
+              .add('show');
+
+            setTimeout(
+              () =>
+              $('toast')
+                .classList
+                .remove('show'),
+              2200
+            );
+
+          }
+
+          function go(id){
+
+            document
+              .querySelectorAll('.screen')
+              .forEach(
+                x =>
+                x.classList.remove('active')
+              );
+
+            $(id)
+              .classList
+              .add('active');
+
+            document
+              .querySelectorAll('.nav')
+              .forEach(
+                x =>
+                x.classList.toggle(
+                  'active',
+                  x.dataset.go===id
+                )
+              );
+
+            render();
+
+          }
+
+          document
+            .querySelectorAll('.nav')
+            .forEach(
+              x =>
+              x.onclick =
+              () => go(x.dataset.go)
+            );
+
+          function render(){
+
+            renderHome();
+            renderMoney();
+            renderDaily();
+            renderGoals();
+            renderSettings();
+            renderChat();
+
+          }
+
+          function renderHome(){
+
+            const d = new Date();
+
+            $('dateText').textContent =
+              d.toLocaleDateString(
+                'ar-EG',
+                {
+                  weekday:'long',
+                  year:'numeric',
+                  month:'long',
+                  day:'numeric'
+                }
+              );
+
+            $('dailyDate').textContent =
+              d.toLocaleDateString(
+                'ar-EG',
+                {
+                  weekday:'long',
+                  day:'numeric',
+                  month:'long'
+                }
+              );
+
+            $('greet').textContent =
+              (
+                d.getHours()<12
+                ? 'صباح الخير'
+                : 'مساء الخير'
+              )
+              +
+              ' يا '
+              +
+              (data.profile.name||'زوكش')
+              +
+              (
+                d.getHours()<12
+                ? ' ☀️'
+                : ' 🌙'
+              );
+
+            const done =
+              data.tasks.filter(
+                x=>x.done
+              ).length;
+
+            $('homeTasks').textContent =
+              done+'/'+data.tasks.length;
+
+            $('homeStreak').textContent =
+              Math.max(
+                0,
+                ...data.habits.map(
+                  x=>x.streak||0
+                )
+              )
+              +
+              ' أيام';
+
+            const td =
+              data.expenses
+                .filter(
+                  x=>x.date===today()
+                )
+                .reduce(
+                  (a,x)=>a+x.amount,
+                  0
+                );
+
+            $('homeToday').textContent =
+              money(td);
+
+            const total =
+              data.expenses.reduce(
+                (a,x)=>a+x.amount,
+                0
+              );
+
+            $('homeSaved').textContent =
+              money(
+                Math.max(
+                  0,
+                  data.profile.income-total
+                )
+              );
+
+            $('homeList').innerHTML =
+              data.tasks
+                .slice(0,3)
+                .map(
+                  t =>
+                  `<div
+                    class="item"
+                    onclick="toggleTask(${t.id})">
+
+                    <div
+                      class="check ${t.done?'done':''}">
+                      ${t.done?'✓':''}
+                    </div>
+
+                    <div class="itemmain">
+
+                      <div class="itemtitle">
+                        ${esc(t.t)}
+                      </div>
+
+                      <div class="mini">
+                        ${esc(t.time||'بدون موعد')}
+                      </div>
+
+                    </div>
+
+                  </div>`
+                )
+                .join('')
+                ||
+                '<div class="empty">مفيش أحداث لسه 👌</div>';
+
+            $('homeGoals').innerHTML =
+              data.goals
+                .slice(0,2)
+                .map(goalCard)
+                .join('')
+                ||
+                '<div class="empty">ابدأ بأول هدف ليك 🎯</div>';
+
+          }
+
+          function renderMoney(){
+
+            const q =
+              ($('moneySearch').value||'')
+                .toLowerCase();
+
+            const total =
+              data.expenses.reduce(
+                (a,x)=>a+x.amount,
+                0
+              );
+
+            const inc =
+              Number(data.profile.income)||0;
+
+            $('incomeVal').textContent =
+              money(inc);
+
+            $('expenseVal').textContent =
+              money(total);
+
+            $('remainVal').textContent =
+              money(inc-total);
+
+            $('monthLabel').textContent =
+              new Date()
+                .toLocaleDateString(
+                  'ar-EG',
+                  {
+                    month:'long',
+                    year:'numeric'
+                  }
+                );
+
+            const cats={};
+
+            data.expenses
+              .filter(
+                x =>
+                !q ||
+                x.cat.toLowerCase().includes(q) ||
+                x.note.toLowerCase().includes(q)
+              )
+              .forEach(
+                x =>
+                cats[x.cat] =
+                (cats[x.cat]||0)+x.amount
+              );
+
+            const vals =
+              Object
+                .entries(cats)
+                .sort(
+                  (a,b)=>b[1]-a[1]
+                );
+
+            const max =
+              Math.max(
+                1,
+                ...vals.map(x=>x[1])
+              );
+
+            $('chart').innerHTML =
+              vals
+                .slice(0,7)
+                .map(
+                  ([c,v]) =>
+                  `<div class="col">
+
+                    <i
+                      style="height:${Math.max(
+                        8,
+                        v/max*125
+                      )}px">
+                    </i>
+
+                    ${esc(c)}
+
+                    <br>
+
+                    ${money(v)}
+
+                  </div>`
+                )
+                .join('')
+                ||
+                '<div class="empty">سجل أول مصروف وهنا هيظهر التحليل 📊</div>';
+
+            $('expenses').innerHTML =
+              data.expenses
+                .filter(
+                  x =>
+                  !q ||
+                  x.cat.toLowerCase().includes(q) ||
+                  x.note.toLowerCase().includes(q)
+                )
+                .slice()
+                .reverse()
+                .slice(0,12)
+                .map(
+                  x =>
+                  `<div class="item">
+
+                    <div style="font-size:24px">
+                      ${esc(x.icon||'💸')}
+                    </div>
+
+                    <div class="itemmain">
+
+                      <div class="itemtitle">
+                        ${esc(x.cat)}
+                      </div>
+
+                      <div class="mini">
+                        ${esc(x.note||'')}
+                        ·
+                        ${x.date}
+                      </div>
+
+                    </div>
+
+                    <strong class="pink">
+                      -${money(x.amount)}
+                    </strong>
+
+                  </div>`
+                )
+                .join('')
+                ||
+                '<div class="empty">لا توجد مصروفات</div>';
+
+            renderInstallments();
+
+          }
+
+          function renderInstallments(){
+
+            $('installments').innerHTML =
+              data.installments
+                .map(
+                  (x,i) =>
+                  `<div class="item">
+
+                    <div style="font-size:25px">
+                      ${esc(x.icon||'💳')}
+                    </div>
+
+                    <div class="itemmain">
+
+                      <div class="itemtitle">
+                        ${esc(x.name)}
+                      </div>
+
+                      <div class="mini">
+                        ${money(x.amount)}
+                        شهريًا
+                        · استحقاق
+                        ${esc(x.due||'غير محدد')}
+                      </div>
+
+                    </div>
+
+                    <button
+                      class="secondary"
+                      onclick="payInstallment(${i})">
+                      دفع
+                    </button>
+
+                  </div>`
+                )
+                .join('')
+                ||
+                '<div class="empty">مفيش أقساط مسجلة</div>';
+
+          }
+
+          function renderDaily(){
+
+            const done =
+              data.tasks.filter(
+                x=>x.done
+              ).length;
+
+            const p =
+              data.tasks.length
+              ?
+              Math.round(
+                done /
+                data.tasks.length *
+                100
+              )
+              :
+              0;
+
+            $('taskPct').textContent =
+              p+'%';
+
+            $('taskBar').style.width =
+              p+'%';
+
+            $('tasks').innerHTML =
+              data.tasks
+                .map(
+                  t =>
+                  `<div class="item">
+
+                    <div
+                      class="check ${t.done?'done':''}"
+                      onclick="toggleTask(${t.id})">
+
+                      ${t.done?'✓':''}
+
+                    </div>
+
+                    <div class="itemmain">
+
+                      <div
+                        class="itemtitle"
+                        style="text-decoration:${
+                          t.done
+                          ? 'line-through'
+                          : 'none'
+                        }">
+
+                        ${esc(t.t)}
+
+                      </div>
+
+                      <div class="mini">
+                        ${esc(
+                          t.time||'بدون موعد'
+                        )}
+                      </div>
+
+                    </div>
+
+                    <button
+                      class="secondary"
+                      onclick="deleteBy(
+                        'tasks',
+                        ${t.id}
+                      )">
+                      ×
+                    </button>
+
+                  </div>`
+                )
+                .join('')
+                ||
+                '<div class="empty">يوم جديد، مهمة جديدة 💪</div>';
+
+            $('habits').innerHTML =
+              data.habits
+                .map(
+                  h =>
+                  `<div class="item">
+
+                    <div style="font-size:25px">
+                      🔥
+                    </div>
+
+                    <div class="itemmain">
+
+                      <div class="itemtitle">
+                        ${esc(h.t)}
+                      </div>
+
+                      <div class="mini">
+                        Streak:
+                        ${h.streak||0}
+                        أيام
+                      </div>
+
+                    </div>
+
+                    <button
+                      class="secondary"
+                      onclick="toggleHabit(${h.id})">
+
+                      ${
+                        h.done
+                        ? '✓ اليوم'
+                        : 'إنجاز'
+                      }
+
+                    </button>
+
+                  </div>`
+                )
+                .join('');
+
+          }
+
+          function goalCard(g){
+
+            const p =
+              Math.min(
+                100,
+                Math.round(
+                  (Number(g.current)||0) /
+                  (Number(g.target)||1) *
+                  100
+                )
+              );
+
+            return `
+            <div class="card goal section">
+
+              <div class="sectionhead">
+
+                <h2>
+                  ${esc(g.icon||'🎯')}
+                  ${esc(g.t)}
+                </h2>
+
+                <span class="pct">
+                  ${p}%
+                </span>
+
+              </div>
+
+              <div class="muted">
+                ${money(g.current)}
+                /
+                ${money(g.target)}
+              </div>
+
+              <div class="bar">
+
+                <i
+                  style="width:${p}%">
+                </i>
+
+              </div>
+
+              <div
+                class="mini"
+                style="margin-top:9px">
+
+                المتبقي
+                ${money(
+                  Math.max(
+                    0,
+                    g.target-g.current
+                  )
+                )}
+
+                · الموعد
+                ${esc(
+                  g.deadline||'غير محدد'
+                )}
+
+              </div>
+
+              <div class="actions">
+
+                <button
+                  class="primary"
+                  onclick="addToGoal(${g.id})">
+
+                  ＋ إضافة توفير
+
+                </button>
+
+                <button
+                  class="secondary"
+                  onclick="deleteBy(
+                    'goals',
+                    ${g.id}
+                  )">
+
+                  حذف
+
+                </button>
+
+              </div>
+
+            </div>`;
+
+          }
+
+          function renderGoals(){
+
+            $('goalsList').innerHTML =
+              data.goals
+                .map(goalCard)
+                .join('')
+                ||
+                '<div class="empty">لسه مفيش أهداف. اعمل أول هدف 🎯</div>';
+
+          }
+
+          function renderSettings(){
+
+            $('profileName').textContent =
+              data.profile.name||'زوكش';
+
+            $('settingsList').innerHTML = `
+
+              <div
+                class="item"
+                onclick="openProfile()">
+
+                <div>👤</div>
+
+                <div class="itemmain">
+
+                  <div class="itemtitle">
+                    الملف الشخصي
+                  </div>
+
+                  <div class="mini">
+                    الاسم والدخل الشهري
+                  </div>
+
+                </div>
+
+                ‹
+
+              </div>
+
+              <div
+                class="item"
+                onclick="notifyTest()">
+
+                <div>🔔</div>
+
+                <div class="itemmain">
+
+                  <div class="itemtitle">
+                    التذكيرات
+                  </div>
+
+                  <div class="mini">
+                    اختبار إشعار Android
+                  </div>
+
+                </div>
+
+                ‹
+
+              </div>
+
+              <div
+                class="item"
+                onclick="backup()">
+
+                <div>☁️</div>
+
+                <div class="itemmain">
+
+                  <div class="itemtitle">
+                    النسخ الاحتياطي
+                  </div>
+
+                  <div class="mini">
+                    تصدير كل بياناتك
+                  </div>
+
+                </div>
+
+                ‹
+
+              </div>
+
+              <div
+                class="item"
+                onclick="$('restoreFile').click()">
+
+                <div>♻️</div>
+
+                <div class="itemmain">
+
+                  <div class="itemtitle">
+                    الاستعادة
+                  </div>
+
+                  <div class="mini">
+                    استرجاع نسخة JSON
+                  </div>
+
+                </div>
+
+                ‹
+
+              </div>
+
+              <div
+                class="item"
+                onclick="searchAll()">
+
+                <div>🔎</div>
+
+                <div class="itemmain">
+
+                  <div class="itemtitle">
+                    البحث الشامل
+                  </div>
+
+                  <div class="mini">
+                    ابحث في المهام والمصاريف والأهداف
+                  </div>
+
+                </div>
+
+                ‹
+
+              </div>
+
+              <div
+                class="item"
+                onclick="toast('يوميات الزوكش V11.0')">
+
+                <div>ℹ️</div>
+
+                <div class="itemmain">
+
+                  <div class="itemtitle">
+                    حول التطبيق
+                  </div>
+
+                  <div class="mini">
+                    Offline First · بياناتك على جهازك
+                  </div>
+
+                </div>
+
+                ‹
+
+              </div>
+
+            `;
+
+          }
+
+          function renderChat(){
+
+            $('chat').innerHTML =
+              data.chat
+                .map(
+                  m =>
+                  `<div
+                    class="msg ${
+                      m.w==='u'
+                      ? 'u'
+                      : 'b'
+                    }">
+
+                    ${esc(m.t)}
+
+                  </div>`
+                )
+                .join('');
+
+            $('chat').scrollTop =
+              $('chat').scrollHeight;
+
+          }
+
+          function esc(s){
+
+            return String(s??'')
+              .replace(
+                /[&<>"']/g,
+                c =>
+                ({
+                  '&':'&amp;',
+                  '<':'&lt;',
+                  '>':'&gt;',
+                  '"':'&quot;',
+                  "'":'&#39;'
+                }[c])
+              );
+
+          }
+
+          function openModal(
+            title,
+            html
+          ){
+
+            $('modalTitle').textContent =
+              title;
+
+            $('modalBody').innerHTML =
+              html;
+
+            $('modal')
+              .classList
+              .add('open');
+
+          }
+
+          function closeModal(){
+
+            $('modal')
+              .classList
+              .remove('open');
+
+          }
+
+          $('modal')
+            .addEventListener(
+              'click',
+              e=>{
+                if(
+                  e.target.id==='modal'
+                ){
+                  closeModal();
+                }
+              }
+            );
+
+          function openExpense(){
+
+            openModal(
+              '💸 إضافة مصروف',
+              `
+
+              <div class="field">
+
+                <label>
+                  المبلغ
+                </label>
+
+                <input
+                  id="fAmount"
+                  type="number"
+                  inputmode="decimal"
+                  placeholder="50">
+
+              </div>
+
+              <div class="field">
+
+                <label>
+                  التصنيف
+                </label>
+
+                <input
+                  id="fCat"
+                  value="مواصلات">
+
+              </div>
+
+              <div class="field">
+
+                <label>
+                  ملاحظة
+                </label>
+
+                <input
+                  id="fNote"
+                  placeholder="مثلاً: مواصلات الشغل">
+
+              </div>
+
+              <div class="actions">
+
+                <button
+                  class="primary"
+                  onclick="saveExpense()">
+
+                  حفظ المصروف
+
+                </button>
+
+                <button
+                  class="secondary"
+                  onclick="closeModal()">
+
+                  إلغاء
+
+                </button>
+
+              </div>
+
+              `
+            );
+
+          }
+
+          function saveExpense(){
+
+            const amount =
+              Number(
+                $('fAmount').value
+              );
+
+            if(!amount)
+              return toast(
+                'اكتب المبلغ'
+              );
+
+            data.expenses.push({
+
+              id:Date.now(),
+
+              amount,
+
+              cat:
+                $('fCat').value ||
+                'أخرى',
+
+              note:
+                $('fNote').value ||
+                '',
+
+              date:today(),
+
+              icon:'💸'
+
+            });
+
+            save();
+            closeModal();
+            render();
+
+            toast(
+              'تم تسجيل المصروف ✅'
+            );
+
+            award(5);
+
+          }
+
+          function addTask(){
+
+            openModal(
+              '✅ مهمة جديدة',
+              `
+
+              <div class="field">
+
+                <label>
+                  المهمة
+                </label>
+
+                <input
+                  id="tName"
+                  placeholder="مراجعة الكورس">
+
+              </div>
+
+              <div class="field">
+
+                <label>
+                  الوقت
+                </label>
+
+                <input
+                  id="tTime"
+                  placeholder="5:00 م">
+
+              </div>
+
+              <div class="actions">
+
+                <button
+                  class="primary"
+                  onclick="saveTask()">
+
+                  إضافة
+
+                </button>
+
+                <button
+                  class="secondary"
+                  onclick="closeModal()">
+
+                  إلغاء
+
+                </button>
+
+              </div>
+
+              `
+            );
+
+          }
+
+          function saveTask(){
+
+            if(
+              !$('tName')
+                .value
+                .trim()
+            )
+              return toast(
+                'اكتب المهمة'
+              );
+
+            data.tasks.push({
+
+              id:Date.now(),
+
+              t:
+                $('tName')
+                  .value
+                  .trim(),
+
+              time:
+                $('tTime')
+                  .value
+                  .trim(),
+
+              done:false
+
+            });
+
+            save();
+            closeModal();
+            render();
+
+            award(5);
+
+          }
+
+          function toggleTask(id){
+
+            const t =
+              data.tasks.find(
+                x=>x.id===id
+              );
+
+            if(!t)return;
+
+            t.done=!t.done;
+
+            if(t.done)
+              award(10);
+
+            save();
+            render();
+
+          }
+
+          function addHabit(){
+
+            openModal(
+              '🔥 عادة جديدة',
+              `
+
+              <div class="field">
+
+                <label>
+                  اسم العادة
+                </label>
+
+                <input
+                  id="hName"
+                  placeholder="قراءة">
+
+              </div>
+
+              <div class="actions">
+
+                <button
+                  class="primary"
+                  onclick="saveHabit()">
+
+                  إضافة
+
+                </button>
+
+                <button
+                  class="secondary"
+                  onclick="closeModal()">
+
+                  إلغاء
+
+                </button>
+
+              </div>
+
+              `
+            );
+
+          }
+
+          function saveHabit(){
+
+            if(
+              !$('hName')
+                .value
+                .trim()
+            )
+              return toast(
+                'اكتب العادة'
+              );
+
+            data.habits.push({
+
+              id:Date.now(),
+
+              t:
+                $('hName')
+                  .value
+                  .trim(),
+
+              streak:0,
+
+              done:false
+
+            });
+
+            save();
+            closeModal();
+            render();
+
+          }
+
+          function toggleHabit(id){
+
+            const h =
+              data.habits.find(
+                x=>x.id===id
+              );
+
+            if(!h)return;
+
+            if(!h.done){
+
+              h.done=true;
+
+              h.streak =
+                (h.streak||0)+1;
+
+              award(15);
+
+            }else{
+
+              h.done=false;
+
+            }
+
+            save();
+            render();
+
+          }
+
+          function addGoal(){
+
+            openModal(
+              '🎯 هدف جديد',
+              `
+
+              <div class="field">
+
+                <label>
+                  اسم الهدف
+                </label>
+
+                <input
+                  id="gName"
+                  placeholder="شراء لابتوب">
+
+              </div>
+
+              <div class="field">
+
+                <label>
+                  المبلغ المطلوب
+                </label>
+
+                <input
+                  id="gTarget"
+                  type="number"
+                  placeholder="20000">
+
+              </div>
+
+              <div class="field">
+
+                <label>
+                  المبلغ الحالي
+                </label>
+
+                <input
+                  id="gCurrent"
+                  type="number"
+                  value="0">
+
+              </div>
+
+              <div class="field">
+
+                <label>
+                  الموعد النهائي
+                </label>
+
+                <input
+                  id="gDate"
+                  type="date">
+
+              </div>
+
+              <div class="actions">
+
+                <button
+                  class="primary"
+                  onclick="saveGoal()">
+
+                  إضافة الهدف
+
+                </button>
+
+                <button
+                  class="secondary"
+                  onclick="closeModal()">
+
+                  إلغاء
+
+                </button>
+
+              </div>
+
+              `
+            );
+
+          }
+
+          function saveGoal(){
+
+            const target =
+              Number(
+                $('gTarget').value
+              );
+
+            if(
+              !$('gName')
+                .value
+                .trim()
+              ||
+              !target
+            )
+              return toast(
+                'أكمل بيانات الهدف'
+              );
+
+            data.goals.push({
+
+              id:Date.now(),
+
+              t:
+                $('gName')
+                  .value
+                  .trim(),
+
+              target,
+
+              current:
+                Number(
+                  $('gCurrent').value
+                )||0,
+
+              deadline:
+                $('gDate').value,
+
+              icon:'🎯'
+
+            });
+
+            save();
+            closeModal();
+            render();
+
+            award(20);
+
+          }
+
+          function addToGoal(id){
+
+            const g =
+              data.goals.find(
+                x=>x.id===id
+              );
+
+            if(!g)return;
+
+            const n =
+              Number(
+                prompt(
+                  'هتحوش كام للهدف؟',
+                  '500'
+                )
+              );
+
+            if(!n)return;
+
+            g.current =
+              Math.min(
+                g.target,
+                g.current+n
+              );
+
+            save();
+            render();
+
+            award(20);
+
+            toast(
+              'تم تحديث الهدف 🎯'
+            );
+
+          }
+
+          function addInstallment(){
+
+            openModal(
+              '💳 قسط جديد',
+              `
+
+              <div class="field">
+
+                <label>
+                  اسم القسط
+                </label>
+
+                <input
+                  id="iName"
+                  placeholder="قسط الموبايل">
+
+              </div>
+
+              <div class="field">
+
+                <label>
+                  القيمة الشهرية
+                </label>
+
+                <input
+                  id="iAmount"
+                  type="number"
+                  placeholder="2500">
+
+              </div>
+
+              <div class="field">
+
+                <label>
+                  موعد الاستحقاق
+                </label>
+
+                <input
+                  id="iDue"
+                  placeholder="يوم 5 من كل شهر">
+
+              </div>
+
+              <div class="actions">
+
+                <button
+                  class="primary"
+                  onclick="saveInstallment()">
+
+                  إضافة
+
+                </button>
+
+                <button
+                  class="secondary"
+                  onclick="closeModal()">
+
+                  إلغاء
+
+                </button>
+
+              </div>
+
+              `
+            );
+
+          }
+
+          function saveInstallment(){
+
+            const n =
+              $('iName')
+                .value
+                .trim();
+
+            const a =
+              Number(
+                $('iAmount').value
+              );
+
+            if(!n||!a)
+              return toast(
+                'أكمل بيانات القسط'
+              );
+
+            data.installments.push({
+
+              name:n,
+
+              amount:a,
+
+              due:
+                $('iDue')
+                  .value
+                  .trim(),
+
+              icon:'💳'
+
+            });
+
+            save();
+            closeModal();
+            render();
+
+          }
+
+          function payInstallment(i){
+
+            const x =
+              data.installments[i];
+
+            if(!x)return;
+
+            if(
+              confirm(
+                'تسجيل '+
+                x.name+
+                ' كمصروف؟'
+              )
+            ){
+
+              data.expenses.push({
+
+                id:Date.now(),
+
+                amount:x.amount,
+
+                cat:'قسط',
+
+                note:x.name,
+
+                date:today(),
+
+                icon:'💳'
+
+              });
+
+              save();
+              render();
+
+              toast(
+                'تم تسجيل القسط 💳'
+              );
+
+            }
+
+          }
+
+          function deleteBy(
+            key,
+            id
+          ){
+
+            data[key] =
+              data[key]
+                .filter(
+                  x=>x.id!==id
+                );
+
+            save();
+            render();
+
+          }
+
+          function quickAdd(){
+
+            const c =
+              prompt(
+                'اختار:\n' +
+                '1 مصروف\n' +
+                '2 مهمة\n' +
+                '3 هدف\n' +
+                '4 عادة',
+                '1'
+              );
+
+            if(c==='1')
+              openExpense();
+
+            else if(c==='2')
+              addTask();
+
+            else if(c==='3')
+              addGoal();
+
+            else if(c==='4')
+              addHabit();
+
+          }
+
+          function openProfile(){
+
+            openModal(
+              '👤 الملف الشخصي',
+              `
+
+              <div class="field">
+
+                <label>
+                  الاسم
+                </label>
+
+                <input
+                  id="pName"
+                  value="${esc(
+                    data.profile.name
+                  )}">
+
+              </div>
+
+              <div class="field">
+
+                <label>
+                  الدخل الشهري
+                </label>
+
+                <input
+                  id="pIncome"
+                  type="number"
+                  value="${
+                    data.profile.income
+                  }">
+
+              </div>
+
+              <div class="actions">
+
+                <button
+                  class="primary"
+                  onclick="saveProfile()">
+
+                  حفظ
+
+                </button>
+
+                <button
+                  class="secondary"
+                  onclick="closeModal()">
+
+                  إلغاء
+
+                </button>
+
+              </div>
+
+              `
+            );
+
+          }
+
+          function saveProfile(){
+
+            data.profile.name =
+              $('pName')
+                .value
+                .trim()
+              ||
+              'زوكش';
+
+            data.profile.income =
+              Number(
+                $('pIncome').value
+              )||0;
+
+            save();
+            closeModal();
+            render();
+
+            toast(
+              'تم تحديث الملف 👌'
+            );
+
+          }
+
+          function backup(){
+
+            const blob =
+              new Blob(
+                [
+                  JSON.stringify(
+                    data,
+                    null,
+                    2
+                  )
+                ],
+                {
+                  type:
+                  'application/json'
+                }
+              );
+
+            const a =
+              document.createElement(
+                'a'
+              );
+
+            a.href =
+              URL.createObjectURL(
+                blob
+              );
+
+            a.download =
+              'yawmeyat-elzoksh-backup.json';
+
+            a.click();
+
+            setTimeout(
+              () =>
+              URL.revokeObjectURL(
+                a.href
+              ),
+              1000
+            );
+
+            toast(
+              'تم تصدير النسخة الاحتياطية ☁️'
+            );
+
+          }
+
+          $('restoreFile')
+            .addEventListener(
+              'change',
+              e=>{
+
+                const f =
+                  e.target.files[0];
+
+                if(!f)return;
+
+                const r =
+                  new FileReader();
+
+                r.onload=()=>{
+
+                  try{
+
+                    const x =
+                      JSON.parse(
+                        r.result
+                      );
+
+                    data =
+                      Object.assign(
+                        fresh(),
+                        x
+                      );
+
+                    save();
+                    render();
+
+                    toast(
+                      'تمت الاستعادة بنجاح ♻️'
+                    );
+
+                  }catch(err){
+
+                    toast(
+                      'ملف النسخة غير صالح'
+                    );
+
+                  }
+
+                };
+
+                r.readAsText(f);
+
+                e.target.value='';
+
+              }
+            );
+
+          function searchAll(){
+
+            const q =
+              prompt(
+                'اكتب كلمة للبحث في كل التطبيق'
+              );
+
+            if(!q)return;
+
+            const out=[];
+
+            data.expenses.forEach(
+              x=>{
+
+                if(
+                  (x.cat+' '+x.note)
+                    .includes(q)
+                ){
+
+                  out.push(
+                    '💸 '+
+                    x.cat+
+                    ' — '+
+                    money(x.amount)
+                  );
+
+                }
+
+              }
+            );
+
+            data.tasks.forEach(
+              x=>{
+
+                if(
+                  x.t.includes(q)
+                ){
+
+                  out.push(
+                    '✅ '+x.t
+                  );
+
+                }
+
+              }
+            );
+
+            data.goals.forEach(
+              x=>{
+
+                if(
+                  x.t.includes(q)
+                ){
+
+                  out.push(
+                    '🎯 '+x.t
+                  );
+
+                }
+
+              }
+            );
+
+            alert(
+              out.length
+              ?
+              out.join('\n')
+              :
+              'ملقيتش حاجة بنفس الكلمة 🔎'
+            );
+
+          }
+
+          function sendChat(){
+
+            const inp =
+              $('chatInput');
+
+            const t =
+              inp.value.trim();
+
+            if(!t)return;
+
+            data.chat.push({
+              w:'u',
+              t
+            });
+
+            inp.value='';
+
+            const n =
+              t.match(
+                /(\d+(?:\.\d+)?)\s*(?:جنيه|ج|EGP)?/
+              );
+
+            let reply='';
+
+            if(
+              /صرف|دفعت|مصروف/.test(t)
+              &&
+              n
+            ){
+
+              const amount =
+                Number(n[1]);
+
+              let cat='أخرى';
+
+              if(/مواصل/.test(t))
+                cat='مواصلات';
+
+              else if(
+                /أكل|مطعم/.test(t)
+              )
+                cat='أكل';
+
+              else if(
+                /سكن|بيت/.test(t)
+              )
+                cat='سكن';
+
+              data.expenses.push({
+
+                id:Date.now(),
+
+                amount,
+
+                cat,
+
+                note:'من المساعد',
+
+                date:today(),
+
+                icon:'🤖'
+
+              });
+
+              reply =
+                `تم تسجيل ${money(amount)} في ${cat} ✅`;
+
+              award(5);
+
+            }
+
+            else if(
+              /رصيد|المتبقي|فلوسي/.test(t)
+            ){
+
+              const e =
+                data.expenses.reduce(
+                  (a,x)=>a+x.amount,
+                  0
+                );
+
+              reply =
+                `دخلك ${money(
+                  data.profile.income
+                )}،
+                إجمالي مصروفاتك ${money(e)}،
+                والمتبقي ${money(
+                  data.profile.income-e
+                )}.`;
+
+            }
+
+            else if(
+              /هدف|توفير|أوفر/.test(t)
+            ){
+
+              reply =
+                data.goals.length
+                ?
+                data.goals
+                  .map(
+                    g =>
+                    `${g.icon} ${g.t}: ${
+                      Math.round(
+                        g.current /
+                        g.target *
+                        100
+                      )
+                    }%`
+                  )
+                  .join('\n')
+                :
+                'لسه مفيش أهداف.';
+
+            }
+
+            else if(
+              /مهمة|مهام/.test(t)
+            ){
+
+              reply =
+                `عندك ${
+                  data.tasks.filter(
+                    x=>!x.done
+                  ).length
+                } مهمة غير منجزة من أصل ${
+                  data.tasks.length
+                }.`;
+
+            }
+
+            else if(
+              /تحليل|حلل/.test(t)
+            ){
+
+              const e =
+                data.expenses.reduce(
+                  (a,x)=>a+x.amount,
+                  0
+                );
+
+              const avg =
+                data.expenses.length
+                ?
+                e /
+                data.expenses.length
+                :
+                0;
+
+              reply =
+                `📊 تحليل سريع:
+                • المصروفات: ${money(e)}
+                • متوسط العملية: ${money(avg)}
+                • أكبر تصنيف: ${topCat()}
+                • الدخل: ${money(
+                  data.profile.income
+                )}`;
+
+            }
+
+            else{
+
+              reply =
+                'أقدر أساعدك في: تسجيل مصروف، إضافة مهمة أو هدف، معرفة رصيدك، وتحليل مصروفاتك.\n' +
+                'جرّب: «صرفت 50 جنيه مواصلات».';
+
+            }
+
+            data.chat.push({
+              w:'b',
+              t:reply
+            });
+
+            save();
+
+            renderChat();
+            renderMoney();
+            renderHome();
+
+          }
+
+          function topCat(){
+
+            const c={};
+
+            data.expenses.forEach(
+              x =>
+              c[x.cat] =
+              (c[x.cat]||0)+x.amount
+            );
+
+            const a =
+              Object
+                .entries(c)
+                .sort(
+                  (x,y)=>y[1]-x[1]
+                )[0];
+
+            return a
+              ?
+              a[0]+
+              ' ('+
+              money(a[1])+
+              ')'
+              :
+              'لا يوجد';
+
+          }
+
+          function award(x){
+
+            data.xp =
+              (data.xp||0)+x;
+
+            save();
+
+          }
+
+          function notifyTest(){
+
+            try{
+
+              if(
+                window.ZokshAndroid
+              ){
+
+                window.ZokshAndroid
+                  .scheduleReminder(
+                    Date.now() %
+                    2147483647,
+
+                    Date.now()+5000,
+
+                    'يوميات الزوكش',
+
+                    'تذكير تجريبي 🔔'
+                  );
+
+                toast(
+                  'هيوصلك إشعار بعد 5 ثواني'
+                );
+
+              }else{
+
+                toast(
+                  'الإشعارات تعمل من نسخة Android APK'
+                );
+
+              }
+
+            }catch(e){
+
+              toast(
+                'تعذر جدولة الإشعار'
+              );
+
+            }
+
+          }
+
+          render();
+
+          </script>
+
+          </body>
+          </html>
+          HTML
+
+          MAIN="$ROOT/app/src/main/java/com/zoksh/yawmeyat/MainActivity.java"
+
+          mkdir -p "$(dirname "$MAIN")"
+
+          cat > "$MAIN" <<'JAVA'
+          package com.zoksh.yawmeyat;
+
+          import android.Manifest;
           import android.app.Activity;
+          import android.content.Intent;
+          import android.content.pm.PackageManager;
+          import android.graphics.Color;
+          import android.net.Uri;
           import android.os.Build;
           import android.os.Bundle;
           import android.provider.Settings;
-          import android.content.Intent;
-          import android.net.Uri;
-          import android.graphics.Color;
           import android.webkit.JavascriptInterface;
           import android.webkit.WebSettings;
           import android.webkit.WebView;
           import android.webkit.WebViewClient;
-          import android.webkit.WebResourceRequest;
-          import android.webkit.WebResourceResponse;
-
-          import androidx.webkit.WebViewAssetLoader;
 
           public class MainActivity extends Activity {
 
               private WebView web;
 
               @Override
-              public void onCreate(Bundle b) {
-                  super.onCreate(b);
+              protected void onCreate(
+                      Bundle savedInstanceState) {
+
+                  super.onCreate(savedInstanceState);
 
                   web = new WebView(this);
-                  web.setBackgroundColor(Color.rgb(16, 6, 34));
 
-                  WebSettings s = web.getSettings();
+                  web.setBackgroundColor(
+                      Color.rgb(16, 8, 33)
+                  );
+
+                  WebSettings s =
+                      web.getSettings();
+
                   s.setJavaScriptEnabled(true);
                   s.setDomStorageEnabled(true);
                   s.setDatabaseEnabled(true);
-                  s.setAllowFileAccess(false);
-                  s.setAllowContentAccess(false);
-                  s.setLoadsImagesAutomatically(true);
+                  s.setAllowFileAccess(true);
+                  s.setAllowContentAccess(true);
                   s.setMediaPlaybackRequiresUserGesture(false);
 
-                  final WebViewAssetLoader loader =
-                      new WebViewAssetLoader.Builder()
-                          .addPathHandler(
-                              "/assets/",
-                              new WebViewAssetLoader.AssetsPathHandler(this)
-                          )
-                          .build();
+                  web.setWebViewClient(
+                      new WebViewClient()
+                  );
 
-                  web.setWebViewClient(new WebViewClient() {
-
-                      @Override
-                      public WebResourceResponse shouldInterceptRequest(
-                              WebView view,
-                              WebResourceRequest request) {
-                          return loader.shouldInterceptRequest(request.getUrl());
-                      }
-
-                      @Override
-                      public WebResourceResponse shouldInterceptRequest(
-                              WebView view,
-                              String url) {
-                          return loader.shouldInterceptRequest(Uri.parse(url));
-                      }
-                  });
-
-                  web.addJavascriptInterface(new AndroidBridge(), "ZokshAndroid");
+                  web.addJavascriptInterface(
+                      new AndroidBridge(),
+                      "ZokshAndroid"
+                  );
 
                   setContentView(web);
 
                   web.loadUrl(
-                      "https://appassets.androidplatform.net/assets/www/index.html"
+                      "file:///android_asset/www/index.html"
                   );
 
-                  if (Build.VERSION.SDK_INT >= 33 &&
+                  if (
+                      Build.VERSION.SDK_INT >= 33
+                      &&
                       checkSelfPermission(
-                          "android.permission.POST_NOTIFICATIONS"
-                      ) != 0) {
+                          Manifest.permission.POST_NOTIFICATIONS
+                      )
+                      != PackageManager.PERMISSION_GRANTED
+                  ) {
+
                       requestPermissions(
-                          new String[]{"android.permission.POST_NOTIFICATIONS"},
+                          new String[]{
+                              Manifest.permission.POST_NOTIFICATIONS
+                          },
                           100
                       );
+
                   }
+
               }
 
               public class AndroidBridge {
@@ -151,79 +3466,297 @@ jobs:
                           long timeMs,
                           String title,
                           String text) {
+
                       ReminderScheduler.schedule(
                           MainActivity.this,
                           id,
                           timeMs,
                           title,
-                          text);
+                          text
+                      );
+
                   }
 
                   @JavascriptInterface
-                  public void cancelReminder(int id) {
+                  public void cancelReminder(
+                          int id) {
+
                       ReminderScheduler.cancel(
                           MainActivity.this,
-                          id);
+                          id
+                      );
+
                   }
 
                   @JavascriptInterface
-                  public void saveReminders(String json) {
+                  public void saveReminders(
+                          String json) {
+
                       getSharedPreferences(
                           ReminderScheduler.PREF,
                           MODE_PRIVATE
-                      ).edit()
-                       .putString("items", json)
-                       .apply();
+                      )
+                      .edit()
+                      .putString(
+                          "items",
+                          json
+                      )
+                      .apply();
+
                   }
 
                   @JavascriptInterface
-                  public void requestExactAlarmPermission() {
-                      if (Build.VERSION.SDK_INT >= 31) {
-                          try {
-                              startActivity(new Intent(
-                                  Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM,
-                                  Uri.parse("package:" + getPackageName())
-                              ));
-                          } catch (Exception ignored) {}
+                  public void requestExactAlarmPermission(){
+
+                      if(
+                          Build.VERSION.SDK_INT >= 31
+                      ){
+
+                          try{
+
+                              startActivity(
+                                  new Intent(
+                                      Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM,
+                                      Uri.parse(
+                                          "package:"+
+                                          getPackageName()
+                                      )
+                                  )
+                              );
+
+                          }catch(Exception ignored){}
+
                       }
+
                   }
+
               }
 
               @Override
-              public void onBackPressed() {
-                  if (web != null && web.canGoBack()) {
-                      web.goBack();
-                  } else {
-                      super.onBackPressed();
-                  }
-              }
-          }
-          '''
+              public void onBackPressed(){
 
-          main.write_text(java)
-          print("WebView fix applied successfully.")
-          print("Project root:", root)
+                  if(
+                      web != null
+                      &&
+                      web.canGoBack()
+                  ){
+
+                      web.goBack();
+
+                  }else{
+
+                      super.onBackPressed();
+
+                  }
+
+              }
+
+              @Override
+              protected void onDestroy(){
+
+                  if(web != null)
+                      web.destroy();
+
+                  super.onDestroy();
+
+              }
+
+          }
+          JAVA
+
+          GRADLE="$ROOT/app/build.gradle"
+
+          python3 - "$GRADLE" <<'PY'
+          from pathlib import Path
+          import re
+          import sys
+
+          p = Path(sys.argv[1])
+
+          s = p.read_text()
+
+          s = re.sub(
+              r'versionCode\s+\d+',
+              'versionCode 13',
+              s
+          )
+
+          s = re.sub(
+              r"versionName\s+'[^']+'",
+              "versionName '11.0'",
+              s
+          )
+
+          p.write_text(s)
+
           PY
+
+          MAN="$ROOT/app/src/main/AndroidManifest.xml"
+
+          python3 - "$MAN" <<'PY'
+          from pathlib import Path
+          import sys
+
+          p = Path(sys.argv[1])
+
+          s = p.read_text()
+
+          permissions = [
+              'android.permission.POST_NOTIFICATIONS',
+              'android.permission.RECEIVE_BOOT_COMPLETED',
+              'android.permission.SCHEDULE_EXACT_ALARM'
+          ]
+
+          for perm in permissions:
+
+              tag = (
+                  f'<uses-permission '
+                  f'android:name="{perm}"/>'
+              )
+
+              if perm not in s:
+
+                  s = s.replace(
+                      '<application',
+                      tag +
+                      '\n    <application',
+                      1
+                  )
+
+          if 'android:usesCleartextTraffic' not in s:
+
+              s = s.replace(
+                  '<application ',
+                  '<application '
+                  'android:usesCleartextTraffic="true" ',
+                  1
+              )
+
+          p.write_text(s)
+
+          PY
+
+          for f in \
+            BootReceiver.java \
+            NotificationReceiver.java \
+            ReminderScheduler.java
+          do
+
+            if [
+              ! -f \
+              "$ROOT/app/src/main/java/com/zoksh/yawmeyat/$f"
+            ]; then
+
+              echo "Missing $f"
+
+              exit 1
+
+            fi
+
+          done
+
+      - name: Validate V11 source
+        working-directory: project
+        run: |
+          set -e
+
+          ROOT="."
+
+          if [ -d android ]; then
+            ROOT="android"
+          fi
+
+          python3 \
+            "$ROOT/app/src/main/assets/www/index.html" \
+            2>/dev/null || true
+
+          python3 - "$ROOT/app/src/main/assets/www/index.html" <<'PY'
+          from pathlib import Path
+          import sys
+
+          p = Path(sys.argv[1])
+
+          s = p.read_text()
+
+          assert 'يوميات الزوكش' in s
+          assert 'function renderChat()' in s
+          assert 'function renderMoney()' in s
+          assert 'function renderGoals()' in s
+          assert 'function sendChat()' in s
+          assert 'function backup()' in s
+          assert 'ZokshAndroid' in s
+
+          js = s[
+              s.index('<script>') + 8:
+              s.rindex('</script>')
+          ]
+
+          Path(
+              '/tmp/v11_app.js'
+          ).write_text(js)
+
+          print(
+              'V11 HTML validation passed.'
+          )
+
+          PY
+
+          node --check /tmp/v11_app.js
+
+          grep -q \
+            'public class MainActivity extends Activity' \
+            "$ROOT/app/src/main/java/com/zoksh/yawmeyat/MainActivity.java"
+
+          echo "V11 source validation passed."
 
       - name: Build APK
         working-directory: project
         run: |
+          set -e
+
           ROOT="."
-          if [ -d "android" ]; then
+
+          if [ -d android ]; then
             ROOT="android"
           fi
 
-          curl -L -o /tmp/gradle.zip \
+          curl -fsSL \
+            -o /tmp/gradle.zip \
             https://services.gradle.org/distributions/gradle-8.7-bin.zip
 
-          unzip -q /tmp/gradle.zip -d /tmp
+          unzip -q \
+            /tmp/gradle.zip \
+            -d /tmp
 
           cd "$ROOT"
 
-          /tmp/gradle-8.7/bin/gradle assembleDebug --stacktrace
+          /tmp/gradle-8.7/bin/gradle \
+            assembleDebug \
+            --stacktrace
 
-      - name: Upload APK
+      - name: Verify APK exists
+        run: |
+          set -e
+
+          APK=$(
+            find project \
+              -path '*/app/build/outputs/apk/debug/app-debug.apk' \
+              -type f |
+            head -1
+          )
+
+          if [ -z "$APK" ]; then
+
+            echo "APK not found"
+
+            exit 1
+
+          fi
+
+          ls -lh "$APK"
+
+      - name: Upload V11 APK
         uses: actions/upload-artifact@v4
         with:
-          name: Yawmeyat-ElZoksh-V10.2-FIXED
+          name: Yawmeyat-ElZoksh-V11.0
           path: project/**/app/build/outputs/apk/debug/app-debug.apk
