@@ -8,489 +8,860 @@ on:
 
 jobs:
   build:
-    name: Build
+    name: Build APK
     runs-on: ubuntu-latest
 
     steps:
 
-      # ==========================================
-      # 1 - تحميل المستودع
-      # ==========================================
+      # =========================================
+      # 1. تحميل المشروع
+      # =========================================
+
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # ==========================================
-      # 2 - Java 17
-      # ==========================================
+
+      # =========================================
+      # 2. Java 17
+      # =========================================
+
       - name: Setup Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
-      # ==========================================
-      # 3 - Android SDK
-      # ==========================================
+
+      # =========================================
+      # 3. Android SDK
+      # =========================================
+
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
+
       - name: Install Android SDK
+        shell: bash
         run: |
+          set -euo pipefail
+
           sdkmanager "platform-tools"
           sdkmanager "platforms;android-35"
           sdkmanager "build-tools;35.0.0"
 
-      # ==========================================
-      # 4 - البحث عن ZIP وفك المشروع
-      # ==========================================
+
+      # =========================================
+      # 4. استخراج ZIP واكتشاف مشروع Android
+      # =========================================
+
       - name: Extract Android project
         shell: bash
         run: |
-          set -e
+          set -euo pipefail
 
-          echo "Searching for project ZIP..."
+          echo "======================================"
+          echo "Searching for Yawmeyat ZIP..."
+          echo "======================================"
 
-          ZIP=$(find . -type f \
-            \( -iname 'Yawmeyat*.zip' -o -iname '*.zip' \) \
-            | head -n 1)
+          ZIP="$(find . -type f -name 'Yawmeyat*.zip' -print -quit)"
 
           if [ -z "$ZIP" ]; then
-            echo "ERROR: No ZIP project found."
+            echo "ERROR: Yawmeyat ZIP was not found."
+            echo ""
+            echo "Files in repository:"
+            find . -maxdepth 4 -type f -print | sort
             exit 1
           fi
 
-          echo "ZIP found:"
+          echo "ZIP FOUND:"
           echo "$ZIP"
 
           rm -rf project
           mkdir -p project
 
+          echo ""
+          echo "Extracting..."
+
           unzip -q "$ZIP" -d project
 
           echo ""
-          echo "Searching for Android project..."
+          echo "Searching for settings.gradle..."
 
-          SETTINGS=$(find project \
-            -type f \
-            -name "settings.gradle" \
-            | head -n 1)
+          SETTINGS="$(find project -type f -name 'settings.gradle' -print -quit)"
 
           if [ -z "$SETTINGS" ]; then
-            echo "ERROR: settings.gradle not found."
+            echo "ERROR: settings.gradle was not found."
+
             echo ""
-            echo "Project files:"
-            find project -maxdepth 6 -type f | sort
+            echo "Extracted files:"
+            find project -maxdepth 8 -type f -print | sort
+
             exit 1
           fi
 
-          ANDROID_ROOT=$(dirname "$SETTINGS")
+          ANDROID_ROOT="$(dirname "$SETTINGS")"
+
           APP_DIR="$ANDROID_ROOT/app"
-
-          if [ ! -f "$APP_DIR/build.gradle" ]; then
-            echo "ERROR: app/build.gradle not found."
-            echo ""
-            echo "Detected Android root:"
-            echo "$ANDROID_ROOT"
-            echo ""
-            echo "Files:"
-            find "$ANDROID_ROOT" -maxdepth 5 -type f | sort
-            exit 1
-          fi
 
           WEB_DIR="$APP_DIR/src/main/assets/www"
 
-          if [ ! -f "$WEB_DIR/index.html" ]; then
-            echo "ERROR: index.html not found."
-            exit 1
-          fi
+          echo ""
+          echo "======================================"
+          echo "PROJECT DETECTED"
+          echo "======================================"
 
-          if [ ! -f "$WEB_DIR/app.js" ]; then
-            echo "ERROR: app.js not found."
-            exit 1
-          fi
-
-          if [ ! -f "$WEB_DIR/style.css" ]; then
-            echo "ERROR: style.css not found."
-            exit 1
-          fi
+          echo "ANDROID_ROOT:"
+          echo "$ANDROID_ROOT"
 
           echo ""
-          echo "ANDROID_ROOT=$ANDROID_ROOT"
-          echo "APP_DIR=$APP_DIR"
-          echo "WEB_DIR=$WEB_DIR"
+          echo "APP_DIR:"
+          echo "$APP_DIR"
+
+          echo ""
+          echo "WEB_DIR:"
+          echo "$WEB_DIR"
+
+          echo ""
+          echo "Checking required files..."
+
+          test -f "$ANDROID_ROOT/settings.gradle"
+
+          test -f "$ANDROID_ROOT/build.gradle"
+
+          test -f "$APP_DIR/build.gradle"
+
+          test -f "$APP_DIR/src/main/AndroidManifest.xml"
+
+          test -f "$APP_DIR/src/main/java/com/zoksh/yawmeyat/MainActivity.java"
+
+          test -f "$WEB_DIR/index.html"
+
+          test -f "$WEB_DIR/app.js"
+
+          test -f "$WEB_DIR/style.css"
+
+          echo ""
+          echo "ALL REQUIRED FILES FOUND."
 
           echo "ANDROID_ROOT=$ANDROID_ROOT" >> "$GITHUB_ENV"
-          echo "APP_DIR=$APP_DIR" >> "$GITHUB_ENV"
-          echo "WEB_DIR=$WEB_DIR"
 
-      # ==========================================
-      # 5 - ترقية الواجهة إلى V11
-      # ==========================================
+          echo "APP_DIR=$APP_DIR" >> "$GITHUB_ENV"
+
+          echo "WEB_DIR=$WEB_DIR" >> "$GITHUB_ENV"
+
+
+      # =========================================
+      # 5. V11 UI
+      # =========================================
+
       - name: Upgrade Web App to V11
         shell: bash
         run: |
-          set -e
+          set -euo pipefail
 
           python3 <<'PY'
           import os
+          import re
           from pathlib import Path
 
           web = Path(os.environ["WEB_DIR"])
+          app = Path(os.environ["APP_DIR"])
 
-          index = web / "index.html"
-          css = web / "style.css"
-          js = web / "app.js"
-
-          # ------------------------------------------
+          # =====================================
           # HTML
-          # ------------------------------------------
+          # =====================================
 
-          html = index.read_text(encoding="utf-8")
+          index_file = web / "index.html"
 
-          html = html.replace(
-              "V10.2",
-              "V11"
+          html = index_file.read_text(
+              encoding="utf-8"
           )
 
-          html = html.replace(
-              "V10",
-              "V11"
+          html = re.sub(
+              r"<title>.*?</title>",
+              "<title>يوميات الزوكش V11</title>",
+              html,
+              count=1,
+              flags=re.S
           )
 
-          if "zoksh-v11-banner" not in html:
+          # Notification button
 
-              banner = r'''
-          <section id="zoksh-v11-banner" style="
+          if 'id="v11Bell"' not in html:
+
+              marker = '<div class="topActions">'
+
+              if marker in html:
+
+                  bell = '''
+          <button
+            id="v11Bell"
+            onclick="openV11Notifications()"
+            aria-label="الإشعارات">
+            🔔
+            <span id="v11Badge">0</span>
+          </button>
+          '''
+
+                  html = html.replace(
+                      marker,
+                      marker + bell,
+                      1
+                  )
+
+
+          # Daily progress
+
+          if 'id="v11Daily"' not in html:
+
+              marker = "<main>"
+
+              if marker in html:
+
+                  daily = '''
+          <section
+            id="v11Daily"
+            style="
               margin:12px 0;
-              padding:15px;
+              padding:15px 16px;
               border-radius:22px;
               background:
                 linear-gradient(
                   135deg,
                   rgba(124,77,255,.28),
-                  rgba(255,64,145,.16)
+                  rgba(255,64,145,.14)
                 );
-              border:1px solid rgba(255,255,255,.10);
-              box-shadow:0 12px 35px rgba(0,0,0,.22);
-          ">
-              <div style="
-                  display:flex;
-                  align-items:center;
-                  justify-content:space-between;
-                  gap:12px;
-              ">
-                  <div>
-                      <div style="
-                          font-size:12px;
-                          opacity:.7;
-                          margin-bottom:4px;
-                      ">
-                          يوميات الزوكش
-                      </div>
+              border:
+                1px solid
+                rgba(255,255,255,.10);
+              box-shadow:
+                0 12px 35px
+                rgba(0,0,0,.22);
+            ">
 
-                      <strong style="
-                          font-size:19px;
-                      ">
-                          🚀 V11 — سيطر على يومك
-                      </strong>
+            <div style="
+              display:flex;
+              justify-content:space-between;
+              align-items:center;
+              gap:12px;
+            ">
 
-                      <div style="
-                          font-size:12px;
-                          opacity:.72;
-                          margin-top:5px;
-                      ">
-                          فلوسك • مهامك • عاداتك • أهدافك
-                      </div>
-                  </div>
+              <div>
 
-                  <div style="
-                      font-size:34px;
+                <small style="
+                  opacity:.7;
+                ">
+                  يومك النهارده
+                </small>
+
+                <div
+                  id="v11Date"
+                  style="
+                    font-weight:800;
+                    margin-top:4px;
                   ">
-                      ⚡
-                  </div>
+                  —
+                </div>
+
               </div>
+
+              <div style="
+                flex:1;
+                max-width:180px;
+                height:8px;
+                border-radius:99px;
+                background:
+                  rgba(255,255,255,.08);
+                overflow:hidden;
+              ">
+
+                <span
+                  id="v11Progress"
+                  style="
+                    display:block;
+                    width:0;
+                    height:100%;
+                    border-radius:99px;
+                    background:
+                      linear-gradient(
+                        90deg,
+                        #7c4dff,
+                        #ff4d9d
+                      );
+                  ">
+                </span>
+
+              </div>
+
+              <b id="v11Percent">
+                0%
+              </b>
+
+            </div>
+
           </section>
           '''
 
-              if "<main>" in html:
                   html = html.replace(
-                      "<main>",
-                      "<main>" + banner,
+                      marker,
+                      marker + daily,
                       1
                   )
 
-          index.write_text(
+
+          # Notification modal
+
+          if 'id="v11NotifyModal"' not in html:
+
+              modal = '''
+          <div
+            id="v11NotifyModal"
+            hidden
+            style="
+              position:fixed;
+              inset:0;
+              z-index:99999;
+              background:
+                rgba(0,0,0,.70);
+              backdrop-filter:
+                blur(8px);
+              padding:18px;
+              place-items:center;
+            ">
+
+            <div style="
+              width:min(100%,420px);
+              max-height:80vh;
+              overflow:auto;
+              border-radius:24px;
+              padding:18px;
+              background:#160d25;
+              border:
+                1px solid
+                rgba(255,255,255,.10);
+              box-shadow:
+                0 20px 70px
+                rgba(0,0,0,.5);
+            ">
+
+              <div style="
+                display:flex;
+                justify-content:space-between;
+                align-items:center;
+                margin-bottom:14px;
+              ">
+
+                <b>
+                  🔔 إشعارات الزوكش
+                </b>
+
+                <button
+                  onclick="closeV11Notifications()">
+                  ✕
+                </button>
+
+              </div>
+
+              <div id="v11NotifyBody"></div>
+
+            </div>
+
+          </div>
+          '''
+
+              html = html.replace(
+                  "</body>",
+                  modal + "</body>",
+                  1
+              )
+
+
+          index_file.write_text(
               html,
               encoding="utf-8"
           )
 
-          # ------------------------------------------
+
+          # =====================================
           # CSS
-          # ------------------------------------------
+          # =====================================
 
-          styles = css.read_text(encoding="utf-8")
+          css_file = web / "style.css"
 
-          styles += r'''
+          css = css_file.read_text(
+              encoding="utf-8"
+          )
 
-          /* ==================================================
-             ZOKSH V11 POLISH
-             ================================================== */
+          css += r'''
 
-          button,
-          .btn,
-          .card,
-          .box,
-          input,
-          select,
-          textarea {
-              transition:
-                  transform .15s ease,
-                  opacity .15s ease,
-                  box-shadow .15s ease,
-                  border-color .15s ease;
+          /* =====================================
+             ZOKSH V11
+             ===================================== */
+
+          #v11Bell {
+            position:relative;
           }
 
-          button:active,
-          .btn:active {
-              transform:scale(.97);
+          #v11Badge {
+            position:absolute;
+            top:-5px;
+            right:-5px;
+
+            min-width:18px;
+            height:18px;
+
+            padding:0 4px;
+
+            display:none;
+
+            align-items:center;
+            justify-content:center;
+
+            border-radius:99px;
+
+            background:#ff4d8d;
+            color:#fff;
+
+            font-size:10px;
+            font-weight:800;
           }
 
-          .card:hover,
-          .box:hover {
-              border-color:rgba(255,255,255,.14);
+          #v11NotifyModal[hidden] {
+            display:none !important;
           }
 
-          input:focus,
-          select:focus,
-          textarea:focus {
-              outline:none;
-              border-color:rgba(124,77,255,.7);
-              box-shadow:
-                  0 0 0 3px rgba(124,77,255,.12);
+          #v11NotifyModal:not([hidden]) {
+            display:grid !important;
+          }
+
+          .v11-notice {
+            padding:13px;
+
+            border-radius:16px;
+
+            background:
+              rgba(255,255,255,.055);
+
+            margin:8px 0;
+          }
+
+          .v11-notice b {
+            display:block;
+          }
+
+          .v11-notice small {
+            display:block;
+            opacity:.72;
+            margin-top:5px;
           }
 
           '''
 
-          css.write_text(
-              styles,
+          css_file.write_text(
+              css,
               encoding="utf-8"
           )
 
-          # ------------------------------------------
-          # JS V11 helpers
-          # ------------------------------------------
 
-          script = js.read_text(encoding="utf-8")
+          # =====================================
+          # JavaScript
+          # =====================================
 
-          if "ZOKSH_V11_LOADED" not in script:
+          js_file = web / "app.js"
 
-              addon = r'''
+          js = js_file.read_text(
+              encoding="utf-8"
+          )
 
-          /* ==================================================
-             ZOKSH V11
-             ================================================== */
+          if "function openV11Notifications()" not in js:
 
-          const ZOKSH_V11_LOADED = true;
+              js += r'''
 
-          function zokshV11Toast(message) {
+          // ==========================================
+          // ZOKSH V11 NOTIFICATIONS
+          // ==========================================
 
-              try {
+          function openV11Notifications(){
 
-                  const old =
-                      document.getElementById(
-                          "zoksh-v11-toast"
-                      );
+            const modal =
+              document.getElementById(
+                "v11NotifyModal"
+              );
 
-                  if (old) old.remove();
+            const body =
+              document.getElementById(
+                "v11NotifyBody"
+              );
 
-                  const toast =
-                      document.createElement("div");
+            if(!modal || !body){
+              return;
+            }
 
-                  toast.id =
-                      "zoksh-v11-toast";
+            const now =
+              new Date();
 
-                  toast.textContent =
-                      message;
+            const notes = [];
 
-                  toast.style.cssText = `
-                      position:fixed;
-                      left:50%;
-                      bottom:92px;
-                      transform:translateX(-50%);
-                      z-index:99999;
-                      padding:12px 18px;
-                      border-radius:16px;
-                      background:rgba(20,12,35,.96);
-                      color:#fff;
-                      border:1px solid rgba(255,255,255,.12);
-                      box-shadow:0 15px 45px rgba(0,0,0,.35);
-                      font-size:13px;
-                      max-width:90%;
-                      text-align:center;
-                  `;
+            const tasks =
+              (window.data &&
+               data.tasks) || [];
 
-                  document.body.appendChild(
-                      toast
-                  );
-
-                  setTimeout(
-                      () => toast.remove(),
-                      2600
-                  );
-
-              } catch (e) {
-                  console.log(e);
-              }
-
-          }
+            const installments =
+              (window.data &&
+               data.installments) || [];
 
 
-          function zokshV11Refresh() {
-
-              try {
-
-                  if (
-                      typeof renderAll === "function"
-                  ) {
-                      renderAll();
-                  }
-
-                  if (
-                      typeof renderHome === "function"
-                  ) {
-                      renderHome();
-                  }
-
-              } catch (e) {
-                  console.log(e);
-              }
-
-          }
+            const todayStr =
+              new Date()
+                .toISOString()
+                .slice(0,10);
 
 
-          function zokshV11Backup() {
-
-              try {
-
-                  const data =
-                      localStorage.getItem(
-                          "zoksh_v8"
-                      );
-
-                  if (!data) {
-
-                      zokshV11Toast(
-                          "مفيش بيانات محفوظة"
-                      );
-
-                      return;
-                  }
-
-                  const blob =
-                      new Blob(
-                          [data],
-                          {
-                              type:
-                                "application/json"
-                          }
-                      );
-
-                  const url =
-                      URL.createObjectURL(
-                          blob
-                      );
-
-                  const a =
-                      document.createElement(
-                          "a"
-                      );
-
-                  a.href = url;
-
-                  a.download =
-                      "zoksh-backup.json";
-
-                  document.body.appendChild(a);
-
-                  a.click();
-
-                  a.remove();
-
-                  URL.revokeObjectURL(
-                      url
-                  );
-
-                  zokshV11Toast(
-                      "تم حفظ النسخة الاحتياطية ✅"
-                  );
-
-              } catch (e) {
-
-                  console.log(e);
-
-                  zokshV11Toast(
-                      "حصل خطأ أثناء النسخ الاحتياطي"
-                  );
-
-              }
-
-          }
+            const todayTasks =
+              tasks.filter(
+                x => x.date === todayStr
+              );
 
 
-          function zokshV11Today() {
+            const done =
+              todayTasks.filter(
+                x => x.done
+              ).length;
+
+
+            if(todayTasks.length){
+
+              notes.push(`
+
+                <div class="v11-notice">
+
+                  <b>
+                    📋 مهام اليوم
+                  </b>
+
+                  <small>
+                    أنجزت
+                    ${done}
+                    من
+                    ${todayTasks.length}
+                    مهمة.
+                  </small>
+
+                </div>
+
+              `);
+
+            }
+
+
+            installments.forEach(x => {
 
               const d =
-                  new Date();
+                new Date(
+                  x.due || ""
+                );
 
-              return new Intl.DateTimeFormat(
-                  "ar-EG",
-                  {
+              if(
+                !isNaN(d) &&
+                d >= now &&
+                d - now <
+                4 * 86400000
+              ){
+
+                notes.push(`
+
+                  <div class="v11-notice">
+
+                    <b>
+                      💳 قسط قريب
+                    </b>
+
+                    <small>
+                      ${String(
+                        x.name ||
+                        "قسط"
+                      )}
+                      —
+                      ${String(
+                        x.amount ||
+                        0
+                      )}
+                      جنيه.
+                    </small>
+
+                  </div>
+
+                `);
+
+              }
+
+            });
+
+
+            body.innerHTML =
+              notes.length
+              ? notes.join("")
+              : `
+
+                <div class="v11-notice">
+
+                  <b>
+                    ✨ كله تمام
+                  </b>
+
+                  <small>
+                    مفيش تنبيهات مهمة دلوقتي.
+                  </small>
+
+                </div>
+
+              `;
+
+
+            modal.hidden = false;
+
+          }
+
+
+          function closeV11Notifications(){
+
+            const modal =
+              document.getElementById(
+                "v11NotifyModal"
+              );
+
+            if(modal){
+
+              modal.hidden = true;
+
+            }
+
+          }
+
+
+          function updateV11Dashboard(){
+
+            try{
+
+              const tasks =
+                (window.data &&
+                 data.tasks) || [];
+
+
+              const todayStr =
+                new Date()
+                  .toISOString()
+                  .slice(0,10);
+
+
+              const todayTasks =
+                tasks.filter(
+                  x => x.date === todayStr
+                );
+
+
+              const done =
+                todayTasks.filter(
+                  x => x.done
+                ).length;
+
+
+              const pct =
+                todayTasks.length
+                ? Math.round(
+                    done /
+                    todayTasks.length *
+                    100
+                  )
+                : 0;
+
+
+              const date =
+                document.getElementById(
+                  "v11Date"
+                );
+
+
+              const bar =
+                document.getElementById(
+                  "v11Progress"
+                );
+
+
+              const text =
+                document.getElementById(
+                  "v11Percent"
+                );
+
+
+              if(date){
+
+                date.textContent =
+                  new Intl.DateTimeFormat(
+                    "ar-EG",
+                    {
                       weekday:"long",
                       day:"numeric",
                       month:"long"
-                  }
-              ).format(d);
+                    }
+                  ).format(
+                    new Date()
+                  );
+
+              }
+
+
+              if(bar){
+
+                bar.style.width =
+                  pct + "%";
+
+              }
+
+
+              if(text){
+
+                text.textContent =
+                  pct + "%";
+
+              }
+
+
+              const badge =
+                document.getElementById(
+                  "v11Badge"
+                );
+
+
+              if(badge){
+
+                const now =
+                  new Date();
+
+
+                const count =
+                  (
+                    (window.data &&
+                     data.installments) ||
+                    []
+                  )
+                  .filter(x => {
+
+                    const d =
+                      new Date(
+                        x.due || ""
+                      );
+
+                    return (
+                      !isNaN(d) &&
+                      d >= now &&
+                      d - now <
+                      4 * 86400000
+                    );
+
+                  })
+                  .length;
+
+
+                badge.textContent =
+                  count;
+
+
+                badge.style.display =
+                  count
+                  ? "flex"
+                  : "none";
+
+              }
+
+            }catch(e){
+
+              console.log(
+                "V11 dashboard:",
+                e
+              );
+
+            }
 
           }
 
 
           window.addEventListener(
-              "load",
-              () => {
+            "load",
+            function(){
 
-                  setTimeout(
-                      () => {
+              setTimeout(
+                updateV11Dashboard,
+                300
+              );
 
-                          zokshV11Toast(
-                              "أهلاً بيك في يوميات الزوكش V11 🚀"
-                          );
+            }
+          );
 
-                      },
-                      900
-                  );
 
-              }
+          setInterval(
+            updateV11Dashboard,
+            5000
           );
 
           '''
 
-              script += addon
-
-          js.write_text(
-              script,
+          js_file.write_text(
+              js,
               encoding="utf-8"
           )
 
-          print("V11 web upgrade completed.")
+
+          # =====================================
+          # Android Version
+          # =====================================
+
+          gradle =
+              app / "build.gradle"
+
+          g =
+              gradle.read_text(
+                  encoding="utf-8"
+              )
+
+
+          g = re.sub(
+              r"versionCode\s+\d+",
+              "versionCode 13",
+              g
+          )
+
+
+          g = re.sub(
+              r"""versionName\s+['"][^'"]+['"]""",
+              "versionName '11.0'",
+              g
+          )
+
+
+          gradle.write_text(
+              g,
+              encoding="utf-8"
+          )
+
+
+          print(
+              "V11 upgrade completed successfully."
+          )
+
           PY
 
-      # ==========================================
-      # 6 - فحص JavaScript
-      # ==========================================
+
+      # =========================================
+      # 6. فحص JavaScript
+      # =========================================
+
       - name: Validate JavaScript
         shell: bash
         run: |
-          set -e
+          set -euo pipefail
+
+          echo "Checking JavaScript..."
 
           node --check "$WEB_DIR/app.js"
 
@@ -498,75 +869,44 @@ jobs:
           test -f "$WEB_DIR/style.css"
           test -f "$WEB_DIR/app.js"
 
-          echo "JavaScript validation: OK"
+          grep -q "versionCode 13" \
+            "$APP_DIR/build.gradle"
 
-      # ==========================================
-      # 7 - تثبيت نسخة Android
-      # ==========================================
-      - name: Set Android Version
+          grep -q "versionName '11.0'" \
+            "$APP_DIR/build.gradle"
+
+          echo ""
+          echo "JavaScript validation PASSED."
+
+
+      # =========================================
+      # 7. التأكد من Android Manifest
+      # =========================================
+
+      - name: Validate Android project
         shell: bash
         run: |
-          set -e
-
-          GRADLE="$APP_DIR/build.gradle"
-
-          python3 - "$GRADLE" <<'PY'
-          import sys
-          import re
-          from pathlib import Path
-
-          p = Path(sys.argv[1])
-          text = p.read_text(encoding="utf-8")
-
-          text = re.sub(
-              r'versionCode\s+\d+',
-              'versionCode 13',
-              text
-          )
-
-          text = re.sub(
-              r"versionName\s+['\"][^'\"]+['\"]",
-              "versionName '11.0'",
-              text
-          )
-
-          p.write_text(
-              text,
-              encoding="utf-8"
-          )
-
-          print("Version set to 11.0")
-          PY
-
-      # ==========================================
-      # 8 - التأكد من Manifest
-      # ==========================================
-      - name: Validate Android Manifest
-        shell: bash
-        run: |
-          set -e
+          set -euo pipefail
 
           MANIFEST="$APP_DIR/src/main/AndroidManifest.xml"
 
           test -f "$MANIFEST"
 
-          grep -q "android.permission.POST_NOTIFICATIONS" "$MANIFEST" \
-            || echo "Notification permission not present - existing project may handle it differently."
+          grep -q "MainActivity" "$MANIFEST"
 
-          grep -q 'MainActivity' "$MANIFEST"
+          echo "Android project validation PASSED."
 
-          echo "Android manifest validation: OK"
 
-      # ==========================================
-      # 9 - تحميل Gradle
-      # ==========================================
+      # =========================================
+      # 8. تحميل Gradle
+      # =========================================
+
       - name: Install Gradle 8.7
         shell: bash
         run: |
-          set -e
+          set -euo pipefail
 
-          curl -L \
-            --fail \
+          curl -fsSL \
             --retry 3 \
             -o /tmp/gradle.zip \
             https://services.gradle.org/distributions/gradle-8.7-bin.zip
@@ -579,55 +919,67 @@ jobs:
 
           /tmp/gradle-8.7/bin/gradle --version
 
-      # ==========================================
-      # 10 - بناء APK
-      # ==========================================
+
+      # =========================================
+      # 9. بناء APK
+      # =========================================
+
       - name: Build APK
         working-directory: ${{ env.ANDROID_ROOT }}
         shell: bash
         run: |
-          set -e
+          set -euo pipefail
 
-          echo "Android project:"
-          pwd
-
-          echo ""
-          echo "Project files:"
-          find . -maxdepth 4 -type f | sort
-
-          echo ""
-          echo "Starting Gradle build..."
+          echo "======================================"
+          echo "BUILDING YAWMEYAT ELZOKSH V11"
+          echo "======================================"
 
           /tmp/gradle-8.7/bin/gradle \
             :app:assembleDebug \
             --no-daemon \
             --stacktrace
 
-      # ==========================================
-      # 11 - التأكد من APK
-      # ==========================================
+
+      # =========================================
+      # 10. التأكد من وجود APK
+      # =========================================
+
       - name: Verify APK
         shell: bash
         run: |
-          set -e
+          set -euo pipefail
 
           APK="$APP_DIR/build/outputs/apk/debug/app-debug.apk"
 
           if [ ! -f "$APK" ]; then
-            echo "ERROR: APK was not generated."
-            find "$APP_DIR/build" -type f 2>/dev/null || true
+
+            echo "ERROR: APK was not created."
+
+            echo ""
+            echo "Build directory:"
+
+            find "$APP_DIR/build" \
+              -maxdepth 6 \
+              -type f \
+              -print \
+              2>/dev/null || true
+
             exit 1
+
           fi
 
           echo ""
           echo "======================================"
           echo "APK CREATED SUCCESSFULLY"
           echo "======================================"
+
           ls -lh "$APK"
 
-      # ==========================================
-      # 12 - رفع APK
-      # ==========================================
+
+      # =========================================
+      # 11. رفع APK
+      # =========================================
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
