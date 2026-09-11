@@ -37,7 +37,17 @@ jobs:
           python3 <<'PY'
           from pathlib import Path
 
-          gradle = Path("android/app/build.gradle")
+          root = Path("android") if Path("android").is_dir() else Path(".")
+
+          gradle = root / "app" / "build.gradle"
+          main = root / "app" / "src/main/java/com/zoksh/yawmeyat/MainActivity.java"
+
+          if not gradle.exists():
+              raise SystemExit(f"build.gradle not found: {gradle}")
+
+          if not main.exists():
+              raise SystemExit(f"MainActivity not found: {main}")
+
           text = gradle.read_text()
 
           if "androidx.webkit:webkit" not in text:
@@ -49,10 +59,7 @@ jobs:
               implementation 'androidx.webkit:webkit:1.12.1'
           }"""
               )
-
-          gradle.write_text(text)
-
-          main = Path("android/app/src/main/java/com/zoksh/yawmeyat/MainActivity.java")
+              gradle.write_text(text)
 
           java = r'''package com.zoksh.yawmeyat;
 
@@ -63,7 +70,6 @@ jobs:
           import android.content.Intent;
           import android.net.Uri;
           import android.graphics.Color;
-          import android.view.View;
           import android.webkit.JavascriptInterface;
           import android.webkit.WebSettings;
           import android.webkit.WebView;
@@ -90,12 +96,10 @@ jobs:
                   s.setDatabaseEnabled(true);
                   s.setAllowFileAccess(false);
                   s.setAllowContentAccess(false);
-                  s.setBuiltInZoomControls(false);
-                  s.setDisplayZoomControls(false);
                   s.setLoadsImagesAutomatically(true);
                   s.setMediaPlaybackRequiresUserGesture(false);
 
-                  final WebViewAssetLoader assetLoader =
+                  final WebViewAssetLoader loader =
                       new WebViewAssetLoader.Builder()
                           .addPathHandler(
                               "/assets/",
@@ -104,20 +108,19 @@ jobs:
                           .build();
 
                   web.setWebViewClient(new WebViewClient() {
+
                       @Override
                       public WebResourceResponse shouldInterceptRequest(
                               WebView view,
-                              WebResourceRequest request
-                      ) {
-                          return assetLoader.shouldInterceptRequest(request.getUrl());
+                              WebResourceRequest request) {
+                          return loader.shouldInterceptRequest(request.getUrl());
                       }
 
                       @Override
                       public WebResourceResponse shouldInterceptRequest(
                               WebView view,
-                              String url
-                      ) {
-                          return assetLoader.shouldInterceptRequest(Uri.parse(url));
+                              String url) {
+                          return loader.shouldInterceptRequest(Uri.parse(url));
                       }
                   });
 
@@ -147,23 +150,20 @@ jobs:
                           int id,
                           long timeMs,
                           String title,
-                          String text
-                  ) {
+                          String text) {
                       ReminderScheduler.schedule(
                           MainActivity.this,
                           id,
                           timeMs,
                           title,
-                          text
-                      );
+                          text);
                   }
 
                   @JavascriptInterface
                   public void cancelReminder(int id) {
                       ReminderScheduler.cancel(
                           MainActivity.this,
-                          id
-                      );
+                          id);
                   }
 
                   @JavascriptInterface
@@ -180,13 +180,11 @@ jobs:
                   public void requestExactAlarmPermission() {
                       if (Build.VERSION.SDK_INT >= 31) {
                           try {
-                              Intent i = new Intent(
+                              startActivity(new Intent(
                                   Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM,
                                   Uri.parse("package:" + getPackageName())
-                              );
-                              startActivity(i);
-                          } catch (Exception ignored) {
-                          }
+                              ));
+                          } catch (Exception ignored) {}
                       }
                   }
               }
@@ -203,22 +201,29 @@ jobs:
           '''
 
           main.write_text(java)
+          print("WebView fix applied successfully.")
+          print("Project root:", root)
           PY
 
       - name: Build APK
-        working-directory: project/android
+        working-directory: project
         run: |
+          ROOT="."
+          if [ -d "android" ]; then
+            ROOT="android"
+          fi
+
           curl -L -o /tmp/gradle.zip \
             https://services.gradle.org/distributions/gradle-8.7-bin.zip
 
           unzip -q /tmp/gradle.zip -d /tmp
 
-          /tmp/gradle-8.7/bin/gradle \
-            assembleDebug \
-            --stacktrace
+          cd "$ROOT"
+
+          /tmp/gradle-8.7/bin/gradle assembleDebug --stacktrace
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: Yawmeyat-ElZoksh-V10.2-FIXED
-          path: project/android/app/build/outputs/apk/debug/app-debug.apk
+          path: project/**/app/build/outputs/apk/debug/app-debug.apk
