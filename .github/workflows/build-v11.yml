@@ -1,0 +1,1138 @@
+name: Build Android APK V11
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install SDK
+        run: |
+          sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Extract project ZIP
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ZIP="$(find . -maxdepth 2 -type f -iname 'Yawmeyat*.zip' | head -n 1)"
+
+          if [ -z "$ZIP" ]; then
+            echo "ERROR: Yawmeyat ZIP not found"
+            exit 1
+          fi
+
+          echo "Using ZIP: $ZIP"
+
+          rm -rf project
+          mkdir -p project
+
+          unzip -q "$ZIP" -d project
+
+          APP_GRADLE="$(find project -type f -path '*/app/build.gradle' | head -n 1)"
+
+          if [ -z "$APP_GRADLE" ]; then
+            echo "ERROR: app/build.gradle not found"
+            find project -maxdepth 6 -type f | head -200
+            exit 1
+          fi
+
+          ANDROID_ROOT="$(dirname "$(dirname "$APP_GRADLE")")"
+          APP_DIR="$(dirname "$APP_GRADLE")"
+          WEB="$APP_DIR/src/main/assets/www"
+
+          echo "ANDROID_ROOT=$ANDROID_ROOT" >> "$GITHUB_ENV"
+          echo "APP_DIR=$APP_DIR" >> "$GITHUB_ENV"
+          echo "WEB=$WEB" >> "$GITHUB_ENV"
+
+          test -f "$WEB/index.html"
+          test -f "$WEB/app.js"
+          test -f "$WEB/style.css"
+
+      - name: Upgrade app to V11
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python3 - "$WEB" <<'PY'
+          import sys
+          from pathlib import Path
+
+          web = Path(sys.argv[1])
+
+          index_file = web / "index.html"
+          css_file = web / "style.css"
+          js_file = web / "app.js"
+
+          index = index_file.read_text(encoding="utf-8")
+          css = css_file.read_text(encoding="utf-8")
+          js = js_file.read_text(encoding="utf-8")
+
+          # =========================
+          # TITLE
+          # =========================
+
+          index = index.replace(
+              "<title>يوميات الزوكش V10.2</title>",
+              "<title>يوميات الزوكش V11</title>"
+          )
+
+          index = index.replace(
+              "<title>يوميات الزوكش</title>",
+              "<title>يوميات الزوكش V11</title>"
+          )
+
+          # =========================
+          # NOTIFICATION BUTTON
+          # =========================
+
+          if 'id="v11Bell"' not in index:
+
+              marker = '<div class="topActions">'
+
+              bell = '''
+              <button
+                id="v11Bell"
+                class="v11-icon"
+                onclick="openV11Notifications()"
+                aria-label="الإشعارات">
+                🔔
+                <span id="v11Badge">0</span>
+              </button>
+              '''
+
+              if marker in index:
+                  index = index.replace(
+                      marker,
+                      marker + bell,
+                      1
+                  )
+
+          # =========================
+          # DAILY PROGRESS BAR
+          # =========================
+
+          if 'class="v11-daily-strip"' not in index:
+
+              daily = '''
+              <section class="v11-daily-strip">
+
+                <div>
+                  <small>يومك النهارده</small>
+                  <b id="v11Date">—</b>
+                </div>
+
+                <div class="v11-progress">
+                  <span id="v11ProgressBar"></span>
+                </div>
+
+                <div>
+                  <b id="v11ProgressText">0%</b>
+                  <small>إنجاز المهام</small>
+                </div>
+
+              </section>
+              '''
+
+              if "<main>" in index:
+                  index = index.replace(
+                      "<main>",
+                      "<main>" + daily,
+                      1
+                  )
+
+          # =========================
+          # NOTIFICATION MODAL
+          # =========================
+
+          if 'id="v11NotifyModal"' not in index:
+
+              modal = '''
+              <div
+                id="v11NotifyModal"
+                class="v11-modal"
+                hidden>
+
+                <div class="v11-modal-card">
+
+                  <div class="v11-modal-head">
+
+                    <b>🔔 إشعارات الزوكش</b>
+
+                    <button
+                      onclick="closeV11Notifications()">
+                      ✕
+                    </button>
+
+                  </div>
+
+                  <div id="v11NotifyBody"></div>
+
+                  <button
+                    class="primary"
+                    onclick="closeV11Notifications()">
+                    تمام
+                  </button>
+
+                </div>
+
+              </div>
+              '''
+
+              if "</body>" in index:
+                  index = index.replace(
+                      "</body>",
+                      modal + "</body>",
+                      1
+                  )
+
+          index_file.write_text(index, encoding="utf-8")
+
+          # =========================
+          # V11 CSS
+          # =========================
+
+          css += r'''
+
+          /* =====================================================
+             ZOKSH V11 UI
+             ===================================================== */
+
+          .v11-icon {
+            position: relative;
+            width: 42px;
+            height: 42px;
+            border-radius: 14px;
+            border: 1px solid rgba(255,255,255,.10);
+            background: rgba(255,255,255,.06);
+            color: #fff;
+            font-size: 19px;
+            cursor: pointer;
+          }
+
+          #v11Badge {
+            position: absolute;
+            top: -4px;
+            right: -4px;
+            min-width: 18px;
+            height: 18px;
+            padding: 0 4px;
+            border-radius: 99px;
+            background: #ff4d8d;
+            color: #fff;
+            font-size: 10px;
+            display: none;
+            align-items: center;
+            justify-content: center;
+          }
+
+          .v11-daily-strip {
+            margin: 10px 0 16px;
+            padding: 14px 15px;
+            border: 1px solid rgba(255,255,255,.08);
+            border-radius: 20px;
+            background:
+              linear-gradient(
+                135deg,
+                rgba(117,62,255,.22),
+                rgba(255,64,145,.10)
+              );
+            display: grid;
+            grid-template-columns: auto 1fr auto;
+            gap: 12px;
+            align-items: center;
+            box-shadow:
+              0 10px 35px rgba(0,0,0,.18);
+          }
+
+          .v11-daily-strip small {
+            display: block;
+            color: var(--muted);
+            font-size: 11px;
+          }
+
+          .v11-daily-strip b {
+            display: block;
+            margin-top: 3px;
+          }
+
+          .v11-progress {
+            height: 8px;
+            border-radius: 99px;
+            background: rgba(255,255,255,.08);
+            overflow: hidden;
+          }
+
+          .v11-progress span {
+            display: block;
+            height: 100%;
+            width: 0;
+            border-radius: 99px;
+            background:
+              linear-gradient(
+                90deg,
+                #7c4dff,
+                #ff4d9d
+              );
+            transition: width .35s ease;
+          }
+
+          .v11-modal {
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,.68);
+            backdrop-filter: blur(8px);
+            z-index: 9999;
+            display: grid;
+            place-items: center;
+            padding: 18px;
+          }
+
+          .v11-modal[hidden] {
+            display: none;
+          }
+
+          .v11-modal-card {
+            width: min(100%,420px);
+            max-height: 80vh;
+            overflow: auto;
+            border: 1px solid rgba(255,255,255,.1);
+            border-radius: 24px;
+            padding: 18px;
+            background: #160d25;
+            box-shadow:
+              0 20px 70px rgba(0,0,0,.5);
+          }
+
+          .v11-modal-head {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 14px;
+          }
+
+          .v11-modal-head button {
+            background: transparent;
+            border: 0;
+            color: #fff;
+            font-size: 18px;
+          }
+
+          .v11-notice {
+            padding: 13px;
+            border-radius: 16px;
+            background: rgba(255,255,255,.055);
+            margin: 8px 0;
+            color: #eee;
+          }
+
+          .v11-notice b {
+            display: block;
+            margin-bottom: 4px;
+          }
+
+          .v11-notice small {
+            color: var(--muted);
+          }
+
+          @media (max-width: 480px) {
+
+            .v11-daily-strip {
+              grid-template-columns: 1fr;
+              gap: 8px;
+            }
+
+            .v11-progress {
+              width: 100%;
+            }
+
+          }
+
+          '''
+
+          css_file.write_text(css, encoding="utf-8")
+
+          # =========================
+          # V11 JAVASCRIPT
+          # =========================
+
+          addon = r'''
+
+          /* =====================================================
+             ZOKSH V11 JAVASCRIPT
+             ===================================================== */
+
+          function openV11Notifications() {
+
+            const modal =
+              document.getElementById("v11NotifyModal");
+
+            const body =
+              document.getElementById("v11NotifyBody");
+
+            if (!modal || !body) return;
+
+            const now = new Date();
+
+            const notes = [];
+
+            const currentData =
+              window.data || {};
+
+            const expenses =
+              currentData.expenses || [];
+
+            const tasks =
+              currentData.tasks || [];
+
+            const installments =
+              currentData.installments || [];
+
+            const today =
+              new Date()
+                .toISOString()
+                .slice(0,10);
+
+            const todayTasks =
+              tasks.filter(
+                x => x.date === today
+              );
+
+            const done =
+              todayTasks.filter(
+                x => x.done
+              ).length;
+
+            if (todayTasks.length) {
+
+              notes.push(`
+                <div class="v11-notice">
+
+                  <b>📋 مهام اليوم</b>
+
+                  <small>
+                    أنجزت
+                    ${done}
+                    من
+                    ${todayTasks.length}
+                    مهمة.
+                  </small>
+
+                </div>
+              `);
+
+            }
+
+            installments.forEach(x => {
+
+              const d =
+                new Date(
+                  x.due ||
+                  x.date ||
+                  ""
+                );
+
+              if (
+                !isNaN(d) &&
+                d >= now &&
+                d - now <
+                4 * 86400000
+              ) {
+
+                notes.push(`
+                  <div class="v11-notice">
+
+                    <b>💳 قسط قريب</b>
+
+                    <small>
+                      ${x.name || "قسط"}
+                      —
+                      ${x.amount || 0}
+                      جنيه.
+                    </small>
+
+                  </div>
+                `);
+
+              }
+
+            });
+
+            const month =
+              now.toISOString()
+                .slice(0,7);
+
+            const spent =
+              expenses
+                .filter(
+                  x =>
+                    String(
+                      x.date || ""
+                    ).startsWith(month)
+                )
+                .reduce(
+                  (a,x) =>
+                    a +
+                    Number(
+                      x.amount || 0
+                    ),
+                  0
+                );
+
+            const income =
+              Number(
+                currentData.income || 0
+              );
+
+            if (
+              income &&
+              spent > income
+            ) {
+
+              notes.push(`
+                <div class="v11-notice">
+
+                  <b>⚠️ تنبيه الميزانية</b>
+
+                  <small>
+                    مصروفات الشهر
+                    تجاوزت الدخل المسجل.
+                  </small>
+
+                </div>
+              `);
+
+            }
+
+            body.innerHTML =
+              notes.join("") ||
+              `
+                <div class="v11-notice">
+
+                  <b>✨ كله تمام</b>
+
+                  <small>
+                    مفيش تنبيهات مهمة دلوقتي.
+                  </small>
+
+                </div>
+              `;
+
+            modal.hidden = false;
+
+          }
+
+
+          function closeV11Notifications() {
+
+            const modal =
+              document.getElementById(
+                "v11NotifyModal"
+              );
+
+            if (modal) {
+              modal.hidden = true;
+            }
+
+          }
+
+
+          function updateV11Header() {
+
+            try {
+
+              const currentData =
+                window.data || {};
+
+              const today =
+                new Date()
+                  .toISOString()
+                  .slice(0,10);
+
+              const tasks =
+                currentData.tasks || [];
+
+              const todayTasks =
+                tasks.filter(
+                  x => x.date === today
+                );
+
+              const done =
+                todayTasks.filter(
+                  x => x.done
+                ).length;
+
+              const pct =
+                todayTasks.length
+                ? Math.round(
+                    done /
+                    todayTasks.length *
+                    100
+                  )
+                : 0;
+
+              const dateElement =
+                document.getElementById(
+                  "v11Date"
+                );
+
+              const bar =
+                document.getElementById(
+                  "v11ProgressBar"
+                );
+
+              const text =
+                document.getElementById(
+                  "v11ProgressText"
+                );
+
+              if (dateElement) {
+
+                dateElement.textContent =
+                  new Intl.DateTimeFormat(
+                    "ar-EG",
+                    {
+                      weekday: "long",
+                      day: "numeric",
+                      month: "long"
+                    }
+                  ).format(
+                    new Date()
+                  );
+
+              }
+
+              if (bar) {
+                bar.style.width =
+                  pct + "%";
+              }
+
+              if (text) {
+                text.textContent =
+                  pct + "%";
+              }
+
+              const badge =
+                document.getElementById(
+                  "v11Badge"
+                );
+
+              if (badge) {
+
+                const currentTime =
+                  new Date();
+
+                const count =
+                  (
+                    currentData.installments ||
+                    []
+                  ).filter(x => {
+
+                    const d =
+                      new Date(
+                        x.due ||
+                        x.date ||
+                        ""
+                      );
+
+                    return (
+                      !isNaN(d) &&
+                      d >= currentTime &&
+                      d - currentTime <
+                      4 * 86400000
+                    );
+
+                  }).length;
+
+                badge.textContent =
+                  count;
+
+                badge.style.display =
+                  count
+                  ? "flex"
+                  : "none";
+
+              }
+
+            } catch (e) {
+
+              console.log(
+                "V11 header:",
+                e
+              );
+
+            }
+
+          }
+
+
+          function saveV11NativeReminders() {
+
+            try {
+
+              if (
+                window.ZokshAndroid &&
+                window.data
+              ) {
+
+                ZokshAndroid.saveReminders(
+                  JSON.stringify(
+                    data.reminders || []
+                  )
+                );
+
+              }
+
+            } catch (e) {
+
+              console.log(
+                "Native reminders:",
+                e
+              );
+
+            }
+
+          }
+
+
+          try {
+
+            window.addEventListener(
+              "load",
+              function() {
+
+                setTimeout(
+                  updateV11Header,
+                  300
+                );
+
+                setTimeout(
+                  saveV11NativeReminders,
+                  500
+                );
+
+              }
+            );
+
+          } catch (e) {}
+
+
+          setInterval(
+            updateV11Header,
+            5000
+          );
+
+          '''
+
+          if "openV11Notifications" not in js:
+              js += "\n" + addon
+
+          js_file.write_text(
+              js,
+              encoding="utf-8"
+          )
+
+          print("V11 upgrade complete")
+          PY
+
+      - name: Validate JavaScript
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          node --check "$WEB/app.js"
+
+          grep -q "openV11Notifications" "$WEB/app.js"
+
+          grep -q "يوميات الزوكش V11" "$WEB/index.html"
+
+          echo "JavaScript validation passed"
+
+      - name: Fix Android MainActivity
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          MAIN="$APP_DIR/src/main/java/com/zoksh/yawmeyat/MainActivity.java"
+
+          mkdir -p "$(dirname "$MAIN")"
+
+          cat > "$MAIN" <<'JAVA'
+          package com.zoksh.yawmeyat;
+
+          import android.app.Activity;
+          import android.os.Build;
+          import android.os.Bundle;
+          import android.provider.Settings;
+          import android.content.Intent;
+          import android.net.Uri;
+          import android.graphics.Color;
+
+          import android.webkit.JavascriptInterface;
+          import android.webkit.WebSettings;
+          import android.webkit.WebView;
+          import android.webkit.WebViewClient;
+          import android.webkit.WebResourceRequest;
+          import android.webkit.WebResourceResponse;
+
+          import androidx.webkit.WebViewAssetLoader;
+
+          public class MainActivity extends Activity {
+
+              private WebView web;
+
+              @Override
+              protected void onCreate(Bundle b) {
+
+                  super.onCreate(b);
+
+                  web = new WebView(this);
+
+                  web.setBackgroundColor(
+                      Color.rgb(16, 6, 34)
+                  );
+
+                  WebSettings settings =
+                      web.getSettings();
+
+                  settings.setJavaScriptEnabled(true);
+                  settings.setDomStorageEnabled(true);
+                  settings.setDatabaseEnabled(true);
+
+                  settings.setAllowFileAccess(false);
+                  settings.setAllowContentAccess(false);
+
+                  settings.setLoadsImagesAutomatically(true);
+
+                  settings.setMediaPlaybackRequiresUserGesture(false);
+
+                  final WebViewAssetLoader loader =
+                      new WebViewAssetLoader.Builder()
+                          .addPathHandler(
+                              "/assets/",
+                              new WebViewAssetLoader
+                                  .AssetsPathHandler(this)
+                          )
+                          .build();
+
+                  web.setWebViewClient(
+                      new WebViewClient() {
+
+                          @Override
+                          public WebResourceResponse
+                          shouldInterceptRequest(
+                              WebView view,
+                              WebResourceRequest request
+                          ) {
+
+                              return loader
+                                  .shouldInterceptRequest(
+                                      request.getUrl()
+                                  );
+                          }
+
+                          @Override
+                          public WebResourceResponse
+                          shouldInterceptRequest(
+                              WebView view,
+                              String url
+                          ) {
+
+                              return loader
+                                  .shouldInterceptRequest(
+                                      Uri.parse(url)
+                                  );
+                          }
+
+                      }
+                  );
+
+                  web.addJavascriptInterface(
+                      new AndroidBridge(),
+                      "ZokshAndroid"
+                  );
+
+                  setContentView(web);
+
+                  web.loadUrl(
+                      "https://appassets.androidplatform.net/assets/www/index.html"
+                  );
+
+                  if (
+                      Build.VERSION.SDK_INT >= 33 &&
+                      checkSelfPermission(
+                          "android.permission.POST_NOTIFICATIONS"
+                      ) != 0
+                  ) {
+
+                      requestPermissions(
+                          new String[]{
+                              "android.permission.POST_NOTIFICATIONS"
+                          },
+                          100
+                      );
+
+                  }
+
+              }
+
+
+              public class AndroidBridge {
+
+                  @JavascriptInterface
+                  public void scheduleReminder(
+                      int id,
+                      long timeMs,
+                      String title,
+                      String text
+                  ) {
+
+                      ReminderScheduler.schedule(
+                          MainActivity.this,
+                          id,
+                          timeMs,
+                          title,
+                          text
+                      );
+
+                  }
+
+
+                  @JavascriptInterface
+                  public void cancelReminder(
+                      int id
+                  ) {
+
+                      ReminderScheduler.cancel(
+                          MainActivity.this,
+                          id
+                      );
+
+                  }
+
+
+                  @JavascriptInterface
+                  public void saveReminders(
+                      String json
+                  ) {
+
+                      getSharedPreferences(
+                          ReminderScheduler.PREF,
+                          MODE_PRIVATE
+                      )
+                      .edit()
+                      .putString(
+                          "items",
+                          json
+                      )
+                      .apply();
+
+                  }
+
+
+                  @JavascriptInterface
+                  public void requestExactAlarmPermission() {
+
+                      if (
+                          Build.VERSION.SDK_INT >= 31
+                      ) {
+
+                          try {
+
+                              startActivity(
+                                  new Intent(
+                                      Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM,
+                                      Uri.parse(
+                                          "package:" +
+                                          getPackageName()
+                                      )
+                                  )
+                              );
+
+                          } catch (Exception ignored) {}
+
+                      }
+
+                  }
+
+              }
+
+
+              @Override
+              public void onBackPressed() {
+
+                  if (
+                      web != null &&
+                      web.canGoBack()
+                  ) {
+
+                      web.goBack();
+
+                  } else {
+
+                      super.onBackPressed();
+
+                  }
+
+              }
+
+
+              @Override
+              protected void onDestroy() {
+
+                  if (web != null) {
+
+                      web.stopLoading();
+                      web.destroy();
+                      web = null;
+
+                  }
+
+                  super.onDestroy();
+
+              }
+
+          }
+          JAVA
+
+          echo "MainActivity fixed"
+
+      - name: Add WebView dependency
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          GRADLE="$APP_DIR/build.gradle"
+
+          if ! grep -q "androidx.webkit:webkit" "$GRADLE"; then
+
+            if grep -q "dependencies[[:space:]]*{" "$GRADLE"; then
+
+              sed -i '/dependencies[[:space:]]*{/a\    implementation "androidx.webkit:webkit:1.12.1"' "$GRADLE"
+
+            else
+
+              cat >> "$GRADLE" <<'EOF'
+
+          dependencies {
+              implementation "androidx.webkit:webkit:1.12.1"
+          }
+          EOF
+
+            fi
+
+          fi
+
+          grep -q "androidx.webkit:webkit" "$GRADLE"
+
+      - name: Add Android permissions
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          MANIFEST="$APP_DIR/src/main/AndroidManifest.xml"
+
+          python3 - "$MANIFEST" <<'PY'
+          import sys
+          from pathlib import Path
+
+          p = Path(sys.argv[1])
+          text = p.read_text(encoding="utf-8")
+
+          permissions = [
+              '<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />',
+              '<uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />',
+              '<uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />'
+          ]
+
+          insert = ""
+
+          for perm in permissions:
+              if perm not in text:
+                  insert += "\n    " + perm
+
+          if insert:
+
+              marker = "<application"
+
+              if marker in text:
+                  text = text.replace(
+                      marker,
+                      insert + "\n\n    " + marker,
+                      1
+                  )
+
+          p.write_text(
+              text,
+              encoding="utf-8"
+          )
+
+          print("Manifest permissions updated")
+          PY
+
+      - name: Set Android version
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          GRADLE="$APP_DIR/build.gradle"
+
+          sed -i -E \
+            's/versionCode[[:space:]]+[0-9]+/versionCode 13/' \
+            "$GRADLE"
+
+          sed -i -E \
+            "s/versionName[[:space:]]+'[^']+'/versionName '11.0'/" \
+            "$GRADLE"
+
+          if ! grep -q "versionCode 13" "$GRADLE"; then
+            echo "ERROR: versionCode could not be updated"
+            exit 1
+          fi
+
+          if ! grep -q "versionName '11.0'" "$GRADLE"; then
+            echo "ERROR: versionName could not be updated"
+            exit 1
+          fi
+
+      - name: Build APK
+        working-directory: ${{ env.ANDROID_ROOT }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          curl -fsSL \
+            -o /tmp/gradle.zip \
+            https://services.gradle.org/distributions/gradle-8.7-bin.zip
+
+          unzip -q \
+            /tmp/gradle.zip \
+            -d /tmp
+
+          /tmp/gradle-8.7/bin/gradle \
+            assembleDebug \
+            --no-daemon \
+            --stacktrace
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Yawmeyat-ElZoksh-V11
+          path: ${{ env.APP_DIR }}/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
