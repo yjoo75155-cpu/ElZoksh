@@ -1,0 +1,376 @@
+name: Build Android APK V11
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+
+    steps:
+
+      # ==========================================
+      # 1 - تحميل المستودع
+      # ==========================================
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ==========================================
+      # 2 - Java 17
+      # ==========================================
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      # ==========================================
+      # 3 - Android SDK
+      # ==========================================
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK
+        run: |
+          sdkmanager "platform-tools"
+          sdkmanager "platforms;android-35"
+          sdkmanager "build-tools;35.0.0"
+
+      # ==========================================
+      # 4 - البحث عن ZIP وفك المشروع
+      # ==========================================
+      - name: Extract Android project
+        shell: bash
+        run: |
+          set -e
+
+          echo "Searching for project ZIP..."
+
+          ZIP=$(find . -type f \
+            -iname 'Yawmeyat*.zip' -o -iname '*.zip' \
+            | head -n 1)
+
+          if [ -z "$ZIP" ]; then
+            echo "ERROR: No ZIP project found."
+            exit 1
+          fi
+
+          echo "ZIP found:"
+          echo "$ZIP"
+
+          rm -rf project
+          mkdir -p project
+
+          unzip -q "$ZIP" -d project
+
+          echo ""
+          echo "Searching for Android project..."
+
+          SETTINGS=$(find project \
+            -type f \
+            -name "settings.gradle" \
+            | head -n 1)
+
+          if [ -z "$SETTINGS" ]; then
+            echo "ERROR: settings.gradle not found."
+            echo ""
+            echo "Project files:"
+            find project -maxdepth 6 -type f | sort
+            exit 1
+          fi
+
+          ANDROID_ROOT=$(dirname "$SETTINGS")
+          APP_DIR="$ANDROID_ROOT/app"
+
+          if [ ! -f "$APP_DIR/build.gradle" ]; then
+            echo "ERROR: app/build.gradle not found."
+            echo ""
+            echo "Detected Android root:"
+            echo "$ANDROID_ROOT"
+            echo ""
+            echo "Files:"
+            find "$ANDROID_ROOT" -maxdepth 5 -type f | sort
+            exit 1
+          fi
+
+          WEB_DIR="$APP_DIR/src/main/assets/www"
+
+          if [ ! -f "$WEB_DIR/index.html" ]; then
+            echo "ERROR: index.html not found."
+            exit 1
+          fi
+
+          if [ ! -f "$WEB_DIR/app.js" ]; then
+            echo "ERROR: app.js not found."
+            exit 1
+          fi
+
+          if [ ! -f "$WEB_DIR/style.css" ]; then
+            echo "ERROR: style.css not found."
+            exit 1
+          fi
+
+          echo ""
+          echo "ANDROID_ROOT=$ANDROID_ROOT"
+          echo "APP_DIR=$APP_DIR"
+          echo "WEB_DIR=$WEB_DIR"
+
+          echo "ANDROID_ROOT=$ANDROID_ROOT" >> "$GITHUB_ENV"
+          echo "APP_DIR=$APP_DIR" >> "$GITHUB_ENV"
+          echo "WEB_DIR=$WEB_DIR"
+
+      # ==========================================
+      # 5 - ترقية الواجهة إلى V11
+      # ==========================================
+      - name: Upgrade Web App to V11
+        shell: bash
+        run: |
+          set -e
+
+          python3 <<'PY'
+          import os
+          from pathlib import Path
+
+          web = Path(os.environ["WEB_DIR"])
+
+          index = web / "index.html"
+          css = web / "style.css"
+          js = web / "app.js"
+
+          # ------------------------------------------
+          # HTML
+          # ------------------------------------------
+
+          html = index.read_text(encoding="utf-8")
+
+          html = html.replace(
+              "V10.2",
+              "V11"
+          )
+
+          html = html.replace(
+              "V10",
+              "V11"
+          )
+
+          if "zoksh-v11-banner" not in html:
+
+              banner = r'''
+          <section id="zoksh-v11-banner" style="
+              margin:12px 0;
+              padding:15px;
+              border-radius:22px;
+              background:
+                linear-gradient(
+                  135deg,
+                  rgba(124,77,255,.28),
+                  rgba(255,64,145,.16)
+                );
+              border:1px solid rgba(255,255,255,.10);
+              box-shadow:0 12px 35px rgba(0,0,0,.22);
+          ">
+              <div style="
+                  display:flex;
+                  align-items:center;
+                  justify-content:space-between;
+                  gap:12px;
+              ">
+                  <div>
+                      <div style="
+                          font-size:12px;
+                          opacity:.7;
+                          margin-bottom:4px;
+                      ">
+                          يوميات الزوكش
+                      </div>
+
+                      <strong style="
+                          font-size:19px;
+                      ">
+                          🚀 V11 — سيطر على يومك
+                      </strong>
+
+                      <div style="
+                          font-size:12px;
+                          opacity:.72;
+                          margin-top:5px;
+                      ">
+                          فلوسك • مهامك • عاداتك • أهدافك
+                      </div>
+                  </div>
+
+                  <div style="
+                      font-size:34px;
+                  ">
+                      ⚡
+                  </div>
+              </div>
+          </section>
+          '''
+
+              if "<main>" in html:
+                  html = html.replace(
+                      "<main>",
+                      "<main>" + banner,
+                      1
+                  )
+
+          index.write_text(
+              html,
+              encoding="utf-8"
+          )
+
+          # ------------------------------------------
+          # CSS
+          # ------------------------------------------
+
+          styles = css.read_text(encoding="utf-8")
+
+          styles += r'''
+
+          /* ==================================================
+             ZOKSH V11 POLISH
+             ================================================== */
+
+          button,
+          .btn,
+          .card,
+          .box,
+          input,
+          select,
+          textarea {
+              transition:
+                  transform .15s ease,
+                  opacity .15s ease,
+                  box-shadow .15s ease,
+                  border-color .15s ease;
+          }
+
+          button:active,
+          .btn:active {
+              transform:scale(.97);
+          }
+
+          .card:hover,
+          .box:hover {
+              border-color:rgba(255,255,255,.14);
+          }
+
+          input:focus,
+          select:focus,
+          textarea:focus {
+              outline:none;
+              border-color:rgba(124,77,255,.7);
+              box-shadow:
+                  0 0 0 3px rgba(124,77,255,.12);
+          }
+
+          '''
+
+          css.write_text(
+              styles,
+              encoding="utf-8"
+          )
+
+          # ------------------------------------------
+          # JS V11 helpers
+          # ------------------------------------------
+
+          script = js.read_text(encoding="utf-8")
+
+          if "ZOKSH_V11_LOADED" not in script:
+
+              addon = r'''
+
+          /* ==================================================
+             ZOKSH V11
+             ================================================== */
+
+          const ZOKSH_V11_LOADED = true;
+
+          function zokshV11Toast(message) {
+
+              try {
+
+                  const old =
+                      document.getElementById(
+                          "zoksh-v11-toast"
+                      );
+
+                  if (old) old.remove();
+
+                  const toast =
+                      document.createElement("div");
+
+                  toast.id =
+                      "zoksh-v11-toast";
+
+                  toast.textContent =
+                      message;
+
+                  toast.style.cssText = `
+                      position:fixed;
+                      left:50%;
+                      bottom:92px;
+                      transform:translateX(-50%);
+                      z-index:99999;
+                      padding:12px 18px;
+                      border-radius:16px;
+                      background:rgba(20,12,35,.96);
+                      color:#fff;
+                      border:1px solid rgba(255,255,255,.12);
+                      box-shadow:0 15px 45px rgba(0,0,0,.35);
+                      font-size:13px;
+                      max-width:90%;
+                      text-align:center;
+                  `;
+
+                  document.body.appendChild(
+                      toast
+                  );
+
+                  setTimeout(
+                      () => toast.remove(),
+                      2600
+                  );
+
+              } catch (e) {
+                  console.log(e);
+              }
+
+          }
+
+
+          function zokshV11Refresh() {
+
+              try {
+
+                  if (
+                      typeof renderAll === "function"
+                  ) {
+                      renderAll();
+                  }
+
+                  if (
+                      typeof renderHome === "function"
+                  ) {
+                      renderHome();
+                  }
+
+              } catch (e) {
+                  console.log(e);
+              }
+
+          }
+
+
+          function zokshV11Backup() {
+
+              try {
+
+                  const data =
+                      local
